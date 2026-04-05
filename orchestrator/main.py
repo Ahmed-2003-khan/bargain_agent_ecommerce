@@ -31,7 +31,7 @@ app = FastAPI(title="INA Orchestrator", lifespan=lifespan)
 
 # ---------------------- Schemas ----------------------
 class ChatInput(BaseModel):
-    user_id: str
+    session_id: str
     message: str
 
 
@@ -72,16 +72,15 @@ async def chat_endpoint(payload: ChatInput):
         # ------------------------------------------------
         # 1️⃣ Push Model → Validate Redis Session
         # ------------------------------------------------
-        session_id = f"session:{payload.user_id}"
-        session = await state_manager.get_session(session_id)
+        redis_key = f"session:{payload.session_id}"
+        session = await state_manager.get_session(redis_key)
 
         if not session:
-            logger.warning(f"Session not found for {session_id}. Using defaults.")
-            session = {
-                "messages": [],
-                "mam": 150.0,
-                "asking_price": 200.0
-            }
+            logger.warning(f"Unauthorized access attempt with invalid session: {payload.session_id}")
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Invalid or expired session ID."
+            )
 
         # ------------------------------------------------
         # 2️⃣ Append User Message
@@ -104,7 +103,7 @@ async def chat_endpoint(payload: ChatInput):
         # ------------------------------------------------
         try:
             state = {
-                "session_id": session_id,
+                "session_id": redis_key,
                 "mam": mam,
                 "asking_price": asking_price,
                 "user_input": payload.message,
@@ -137,7 +136,7 @@ async def chat_endpoint(payload: ChatInput):
             "brain_key": brain_key
         })
 
-        await state_manager.set_session(session_id, session)
+        await state_manager.set_session(redis_key, session)
 
         return ChatOutput(response=ai_response)
 
@@ -145,6 +144,6 @@ async def chat_endpoint(payload: ChatInput):
         raise
 
     except Exception as e:
-        logger.exception(f"Unexpected error for {payload.user_id}: {e}")
+        logger.exception(f"Unexpected error for session {payload.session_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 

@@ -1,13 +1,18 @@
 # Purpose: Initializes the FastAPI application and defines API endpoints.
 
-from fastapi import FastAPI, HTTPException
-from .schemas import StrategyInput, StrategyOutput
-from .strategy_core import make_decision  # <-- IMPORT YOUR NEW LOGIC
+import os
 import logging
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from .schemas import StrategyInput, StrategyOutput
+from .strategy_core import make_decision
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ---------------------- Internal Service Key ----------------------
+INTERNAL_KEY = os.getenv("INTERNAL_SERVICE_KEY", "")
 
 # Initialize the FastAPI app
 app = FastAPI(
@@ -17,6 +22,28 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
+# ---------------------- Auth Middleware ----------------------
+@app.middleware("http")
+async def verify_internal_key(request: Request, call_next):
+    """
+    Verify that incoming requests carry the correct X-Internal-Key header.
+    Health check endpoint is exempt so Docker/k8s healthchecks still work.
+    """
+    if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+        return await call_next(request)
+
+    incoming_key = request.headers.get("X-Internal-Key", "")
+    if not INTERNAL_KEY or incoming_key != INTERNAL_KEY:
+        logger.warning(f"Unauthorized request to {request.url.path} — key mismatch")
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Forbidden: Invalid internal service key."},
+        )
+
+    return await call_next(request)
+
+
 # --- Health Check Endpoint ---
 @app.get("/health", status_code=200)
 async def health_check():
@@ -25,7 +52,7 @@ async def health_check():
     """
     return {"status": "ok", "service": "strategy-engine"}
 
-# --- Strategy Endpoint (Today's Task) ---
+# --- Strategy Endpoint ---
 @app.post("/decide", response_model=StrategyOutput)
 async def decide_strategy(input_data: StrategyInput):
     """
@@ -36,17 +63,12 @@ async def decide_strategy(input_data: StrategyInput):
     try:
         logger.info(f"Received request for session: {input_data.session_id}")
         
-        # The API layer's only job:
-        # 1. Validate input (done by Pydantic/FastAPI)
-        # 2. Call the core logic
-        # 3. Return the result
         decision = make_decision(input_data)
         
         logger.info(f"Decision for {input_data.session_id}: {decision.action}")
         return decision
         
     except Exception as e:
-        # General error handling
         logger.error(f"Error during decision for {input_data.session_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,

@@ -4,6 +4,9 @@ services:
     container_name: orchestrator
     ports:
       - "8000:8000"
+    environment:
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
     depends_on:
       - redis
       - strategy-engine
@@ -15,20 +18,25 @@ services:
     container_name: strategy-engine
     ports:
       - "8001:8000"
+    environment:
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
 
   nlu-service:
     build: ./microservices/nlu-service
     container_name: nlu-service
     ports:
       - "8002:8000"
+    environment:
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
 
-  llm-phraser:                    # <--- NEW
+  llm-phraser:
     build: ./microservices/llm-phraser
     container_name: llm-phraser
     ports:
-      - "8003:8000" 
+      - "8003:8000"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}        # browser URL → http://localhost:8003/docs
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
 
   redis:
     image: redis:alpine

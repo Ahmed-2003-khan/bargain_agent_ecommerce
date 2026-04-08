@@ -1,9 +1,11 @@
+import os
 import httpx
 import logging
 
 logger = logging.getLogger("brain_client")
 
-STRATEGY_ENGINE_URL = "http://strategy-engine:8000"
+STRATEGY_ENGINE_URL = os.getenv("STRATEGY_ENGINE_URL", "http://strategy-engine:8000")
+INTERNAL_KEY = os.getenv("INTERNAL_SERVICE_KEY", "")
 
 # Map NLU intents to Strategy Engine intents
 INTENT_MAP = {
@@ -29,13 +31,16 @@ async def call_brain(mam, asking_price, user_offer, user_intent, user_sentiment,
         "history": history
     }
 
+    headers = {"X-Internal-Key": INTERNAL_KEY}
+
     logger.info(f"[MS4] Sending to Brain: session={session_id}, intent={mapped_intent}, offer={user_offer}")
 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.post(
                 f"{STRATEGY_ENGINE_URL}/decide",
-                json=payload
+                json=payload,
+                headers=headers,
             )
             resp.raise_for_status()
             return resp.json()

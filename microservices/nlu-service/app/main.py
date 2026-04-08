@@ -1,10 +1,43 @@
+import os
 import re
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ---------------------- Internal Service Key ----------------------
+INTERNAL_KEY = os.getenv("INTERNAL_SERVICE_KEY", "")
 
 app = FastAPI(title="NLU Service (MS2)")
 
 
+# ---------------------- Auth Middleware ----------------------
+@app.middleware("http")
+async def verify_internal_key(request: Request, call_next):
+    """
+    Verify that incoming requests carry the correct X-Internal-Key header.
+    Health check endpoint is exempt so Docker/k8s healthchecks still work.
+    """
+    # Allow health checks without auth
+    if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
+        return await call_next(request)
+
+    # Verify the key
+    incoming_key = request.headers.get("X-Internal-Key", "")
+    if not INTERNAL_KEY or incoming_key != INTERNAL_KEY:
+        logger.warning(f"Unauthorized request to {request.url.path} — key mismatch")
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Forbidden: Invalid internal service key."},
+        )
+
+    return await call_next(request)
+
+
+# ---------------------- Schemas ----------------------
 class NLUInput(BaseModel):
     text: str
     session_id: str
@@ -16,6 +49,13 @@ class NLUOutput(BaseModel):
     sentiment: str
 
 
+# ---------------------- Health ----------------------
+@app.get("/health", status_code=200)
+async def health_check():
+    return {"status": "ok", "service": "nlu-service"}
+
+
+# ---------------------- Parse Endpoint ----------------------
 @app.post("/parse", response_model=NLUOutput)
 async def parse(input: NLUInput):
     text = input.text.lower()
@@ -26,7 +66,6 @@ async def parse(input: NLUInput):
     price_match = re.search(r"(\d+)", text)
     price = float(price_match.group(1)) if price_match else None
 
-    # -------------------------
     # -------------------------
     # 2️⃣ Intent Detection
     # -------------------------

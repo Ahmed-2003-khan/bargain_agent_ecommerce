@@ -1,9 +1,28 @@
 services:
+
+  # =============================================
+  # 🛡️ API Gateway — All external traffic enters here
+  # =============================================
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-gateway
+    ports:
+      - "80:80"             # Only Nginx is exposed externally
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+  # =============================================
+  # 🧠 Orchestrator — Internal only (behind Nginx)
+  # =============================================
   orchestrator:
     build: .
     container_name: orchestrator
-    ports:
-      - "8000:8000"
+    # Port 8000 is NOT exposed to host — only accessible via Nginx
+    expose:
+      - "8000"
     environment:
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
@@ -12,34 +31,47 @@ services:
       - strategy-engine
       - nlu-service
       - llm-phraser
+    restart: unless-stopped
 
+  # =============================================
+  # Microservices — Internal only
+  # =============================================
   strategy-engine:
     build: ./microservices/strategy-engine
     container_name: strategy-engine
-    ports:
-      - "8001:8000"
+    expose:
+      - "8000"
     environment:
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+    restart: unless-stopped
 
   nlu-service:
     build: ./microservices/nlu-service
     container_name: nlu-service
-    ports:
-      - "8002:8000"
+    expose:
+      - "8000"
     environment:
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+    restart: unless-stopped
 
   llm-phraser:
     build: ./microservices/llm-phraser
     container_name: llm-phraser
-    ports:
-      - "8003:8000"
+    expose:
+      - "8000"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+    restart: unless-stopped
 
+  # =============================================
+  # Redis
+  # =============================================
   redis:
     image: redis:alpine
     container_name: redis
+    expose:
+      - "6379"
     ports:
-      - "6379:6379"
+      - "6379:6379"         # Exposed for local debugging (remove in production)
+    restart: unless-stopped

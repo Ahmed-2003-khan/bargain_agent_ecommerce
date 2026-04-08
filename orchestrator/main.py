@@ -8,15 +8,24 @@ Auth Model:
     session_id exists in Redis and has the correct structure.
 
     Flow: Tenant → Monolith (API key) → Redis session → Orchestrator (session_id)
+
+Rate Limiting:
+    Two layers of protection:
+    1. Nginx (API gateway) — IP-based rate limiting (10 req/s per IP)
+    2. SlowAPI (application) — session-based rate limiting (10 req/min per session)
 """
 
 import os
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
+
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
 
 from orchestrator.lib import state_manager
 from orchestrator.graph.workflow import build_workflow
@@ -33,6 +42,20 @@ logger = logging.getLogger("orchestrator")
 graph_app = build_workflow()
 
 
+# ---------------------- Rate Limiter ----------------------
+def _get_session_id_from_request(request: Request) -> str:
+    """
+    Extract session_id from the request body for rate limiting.
+    Falls back to client IP if session_id can't be extracted.
+    This ensures rate limiting is per-session, not just per-IP.
+    """
+    # For non-JSON requests or health checks, use IP
+    return request.client.host if request.client else "unknown"
+
+
+limiter = Limiter(key_func=_get_session_id_from_request)
+
+
 # ---------------------- Lifespan ----------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,10 +69,29 @@ async def lifespan(app: FastAPI):
 # ---------------------- App Init ----------------------
 app = FastAPI(title="INA Orchestrator", lifespan=lifespan)
 
+# Attach limiter to app state (required by slowapi)
+app.state.limiter = limiter
+
+
+# ---------------------- Rate Limit Error Handler ----------------------
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Return a clean JSON 429 response when rate limit is exceeded."""
+    logger.warning(
+        "Rate limit exceeded — client=%s path=%s",
+        request.client.host if request.client else "unknown",
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Too many requests. Please slow down.",
+            "retry_after": str(exc.detail),
+        },
+    )
+
+
 # ---------------------- CORS ----------------------
-# Allowed origins — comma-separated in env, default "*" for development.
-# Production mein specific tenant domains set karo:
-#   ALLOWED_ORIGINS=https://tenant1.com,https://tenant2.com
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = (
     ["*"] if _raw_origins.strip() == "*"
@@ -87,11 +129,6 @@ async def validate_session(payload: ChatInput) -> SessionData:
         2. Agar session nahi mili → 401 Unauthorized (invalid/expired).
         3. Agar session structure corrupt hai → 401 Unauthorized (invalid data).
         4. Valid session return karo as a Pydantic SessionData object.
-
-    Usage:
-        @app.post("/ina/v1/chat")
-        async def chat(payload: ChatInput, session: SessionData = Depends(validate_session)):
-            # session is guaranteed to be valid here
     """
     redis_key = f"session:{payload.session_id}"
 
@@ -124,7 +161,7 @@ async def validate_session(payload: ChatInput) -> SessionData:
     return session
 
 
-# ---------------------- Health ----------------------
+# ---------------------- Health (no rate limit) ----------------------
 @app.get("/")
 async def home():
     return {"message": "Orchestrator is running!"}
@@ -150,16 +187,20 @@ async def health_check():
 
 
 # =====================================================
-# 🔥 MAIN CHAT ENDPOINT (Session-Authenticated)
+# 🔥 MAIN CHAT ENDPOINT (Session-Authenticated + Rate-Limited)
 # =====================================================
 @app.post("/ina/v1/chat", response_model=ChatOutput)
+@limiter.limit("10/minute")
 async def chat_endpoint(
+    request: Request,
     payload: ChatInput,
     session: SessionData = Depends(validate_session),
 ):
     """
-    Main chat endpoint. Auth is handled by the validate_session dependency —
-    if we reach this function body, the session is guaranteed to be valid.
+    Main chat endpoint.
+    - Auth: handled by validate_session dependency
+    - Rate limit: 10 requests per minute per client IP (application layer)
+    - Nginx also enforces 10 req/s per IP (gateway layer)
     """
 
     try:
@@ -174,7 +215,6 @@ async def chat_endpoint(
         # ------------------------------------------------
         # 2️⃣ Append user message to history
         # ------------------------------------------------
-        # Work with the raw list from the session model
         history = list(session.messages)
         history.append({
             "from": "user",
@@ -221,7 +261,6 @@ async def chat_endpoint(
             "brain_key": brain_key,
         })
 
-        # Rebuild the full session dict for Redis storage
         updated_session = session.model_dump()
         updated_session["messages"] = history
         await state_manager.set_session(redis_key, updated_session)

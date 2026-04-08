@@ -7,11 +7,12 @@ services:
     image: nginx:alpine
     container_name: nginx-gateway
     ports:
-      - "80:80"             # Only Nginx is exposed externally
+      - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy
     restart: unless-stopped
 
   # =============================================
@@ -20,17 +21,26 @@ services:
   orchestrator:
     build: .
     container_name: orchestrator
-    # Port 8000 is NOT exposed to host — only accessible via Nginx
     expose:
       - "8000"
     environment:
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
     depends_on:
-      - redis
-      - strategy-engine
-      - nlu-service
-      - llm-phraser
+      redis:
+        condition: service_healthy
+      strategy-engine:
+        condition: service_healthy
+      nlu-service:
+        condition: service_healthy
+      llm-phraser:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   # =============================================
@@ -43,6 +53,12 @@ services:
       - "8000"
     environment:
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   nlu-service:
@@ -52,6 +68,12 @@ services:
       - "8000"
     environment:
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   llm-phraser:
@@ -62,6 +84,12 @@ services:
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # =============================================
@@ -73,5 +101,10 @@ services:
     expose:
       - "6379"
     ports:
-      - "6379:6379"         # Exposed for local debugging (remove in production)
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped

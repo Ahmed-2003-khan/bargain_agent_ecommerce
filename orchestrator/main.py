@@ -28,6 +28,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 
 from orchestrator.lib import state_manager
+from orchestrator.lib.http_pool import close_http_client
 from orchestrator.graph.workflow import build_workflow
 from orchestrator.session_schemas import SessionData
 
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI):
     logger.info("INA Orchestrator starting up...")
     yield
     logger.info("INA Orchestrator shutting down...")
+    await close_http_client()
     await state_manager.close_redis()
 
 

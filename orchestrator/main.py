@@ -28,6 +28,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 
 from orchestrator.lib import state_manager
+from orchestrator.lib.state_manager import session_lock
 from orchestrator.lib.http_pool import close_http_client
 from orchestrator.graph.workflow import build_workflow
 from orchestrator.session_schemas import SessionData
@@ -209,63 +210,69 @@ async def chat_endpoint(
         redis_key = f"session:{payload.session_id}"
 
         # ------------------------------------------------
-        # 1️⃣ Read business inputs from validated session
+        # 🔒 Acquire distributed lock (Race Condition Fix 5.2)
+        # Ensures only one request processes a session at a time.
         # ------------------------------------------------
-        mam = session.mam
-        asking_price = session.asking_price
+        async with session_lock(redis_key):
 
-        # ------------------------------------------------
-        # 2️⃣ Append user message to history
-        # ------------------------------------------------
-        history = list(session.messages)
-        history.append({
-            "from": "user",
-            "text": payload.message,
-        })
+            # --------------------------------------------
+            # 1️⃣ Read business inputs from validated session
+            # --------------------------------------------
+            mam = session.mam
+            asking_price = session.asking_price
 
-        # ------------------------------------------------
-        # 3️⃣ LangGraph Execution
-        # ------------------------------------------------
-        try:
-            state = {
-                "session_id": redis_key,
-                "mam": mam,
-                "asking_price": asking_price,
-                "user_input": payload.message,
-                "history": history,
-            }
+            # --------------------------------------------
+            # 2️⃣ Append user message to history
+            # --------------------------------------------
+            history = list(session.messages)
+            history.append({
+                "from": "user",
+                "text": payload.message,
+            })
 
-            result = await graph_app.ainvoke(state)
+            # --------------------------------------------
+            # 3️⃣ LangGraph Execution
+            # --------------------------------------------
+            try:
+                state = {
+                    "session_id": redis_key,
+                    "mam": mam,
+                    "asking_price": asking_price,
+                    "user_input": payload.message,
+                    "history": history,
+                }
 
-            ai_response = result.get(
-                "final_response",
-                "Let me think about that for a moment.",
-            )
-            brain_action = result.get("brain_action")
-            brain_key = result.get("response_key")
+                result = await graph_app.ainvoke(state)
 
-        except Exception:
-            logger.exception("Graph failed, using safe fallback")
-            ai_response = (
-                "Let me think about that for a moment. "
-                "Could you please try again?"
-            )
-            brain_action = "FALLBACK"
-            brain_key = "GRAPH_FAIL"
+                ai_response = result.get(
+                    "final_response",
+                    "Let me think about that for a moment.",
+                )
+                brain_action = result.get("brain_action")
+                brain_key = result.get("response_key")
 
-        # ------------------------------------------------
-        # 4️⃣ Save updated history back to Redis
-        # ------------------------------------------------
-        history.append({
-            "from": "ina",
-            "text": ai_response,
-            "brain_action": brain_action,
-            "brain_key": brain_key,
-        })
+            except Exception:
+                logger.exception("Graph failed, using safe fallback")
+                ai_response = (
+                    "Let me think about that for a moment. "
+                    "Could you please try again?"
+                )
+                brain_action = "FALLBACK"
+                brain_key = "GRAPH_FAIL"
 
-        updated_session = session.model_dump()
-        updated_session["messages"] = history
-        await state_manager.set_session(redis_key, updated_session)
+            # --------------------------------------------
+            # 4️⃣ Save updated history back to Redis
+            # --------------------------------------------
+            history.append({
+                "from": "ina",
+                "text": ai_response,
+                "brain_action": brain_action,
+                "brain_key": brain_key,
+            })
+
+            updated_session = session.model_dump()
+            updated_session["messages"] = history
+            await state_manager.set_session(redis_key, updated_session)
 
         return ChatOutput(response=ai_response)
 

@@ -36,6 +36,12 @@ class PhraserInput(BaseModel):
         description="The new price to offer (if action is COUNTER)."
     )
     
+    # Language detected by the NLU service — used to match response language
+    language: str = Field(
+        default="english",
+        description="Language detected by NLU: english, roman_urdu, urdu, other."
+    )
+    
     # --- Auditing & Metadata (from MS 4) ---
     policy_type: str = Field(
         ...,

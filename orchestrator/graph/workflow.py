@@ -10,6 +10,7 @@ FAST_TRACK_INTENTS = {
     Intent.BYE,
     Intent.DEAL,
     Intent.ASK_PREVIOUS_OFFER,
+    Intent.ASK_QUESTION,
 }
 
 

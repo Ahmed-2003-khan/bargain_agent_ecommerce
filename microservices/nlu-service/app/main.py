@@ -150,4 +150,5 @@ async def parse(input: NLUInput):
         intent=result["intent"],
         entities={"PRICE": result["price"]},
         sentiment=result["sentiment"],
+        language=result.get("language", "english"),
     )

@@ -19,6 +19,11 @@ SYSTEM_PROMPT = (
     "4. ***SECURITY GUARDRAIL***: You MUST NOT, under any circumstances, "
     "   mention a 'floor price', 'minimum price', 'my cost', or 'my margin'. "
     "   Only state the prices you are given."
+    "5. Be concise and crisp. Do not add unnecessary 'fluff', overly excited "
+    "   sales pitches, or long-winded friendly padding. Get straight to the point.\n"
+    "6. CRITICAL MULTILINGUAL RULE: The user's language has been detected as '{language}'. "
+    "   You MUST write your entire response in that language. "
+    "   (roman_urdu = Urdu written in Latin letters, urdu = Urdu script, english = English, other = match the detected language)"
 )
 
 # --- Prompt Templates ---
@@ -45,6 +50,12 @@ TEMPLATES = {
     "PREVIOUS_OFFER": [
         "Template: Earlier you offered {user_offer}, and I countered with {bot_offer}.",
         "Template: You last offered {user_offer}, and my response was {bot_offer}."
+    ],
+
+    "OUT_OF_SCOPE_QUESTION": [
+        "Template: I am an automated bargaining agent here to negotiate the price. For product details or general questions, please check the main product description.",
+        "Template: My sole purpose is to negotiate the best price with you. I cannot answer general questions, but I'm ready for your offer!",
+        "Template: I'm here exclusively for price bargaining. Please make an offer or ask me about the price, as I am not equipped to answer other questions."
     ],
 
     # 1. Standard Acceptance
@@ -119,5 +130,10 @@ def get_formatted_prompt(input_data: PhraserInput) -> Tuple[str, str]:
         logger.exception("Error formatting prompt: %s", e)
         formatted_prompt = "Template: I'm not sure how to respond."
 
-    return SYSTEM_PROMPT, formatted_prompt
+    # Inject detected language into System Prompt
+    formatted_system_prompt = SYSTEM_PROMPT.format(
+        language=input_data.language or "english"
+    )
+
+    return formatted_system_prompt, formatted_prompt
     

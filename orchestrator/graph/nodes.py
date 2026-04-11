@@ -28,6 +28,7 @@ async def nlu_node(state: AgentState):
     state["intent"] = nlu.get("intent", Intent.UNKNOWN)
     state["sentiment"] = nlu.get("sentiment", "neutral")
     state["user_offer"] = nlu.get("entities", {}).get("PRICE", 0)
+    state["language"] = nlu.get("language", "english")
 
     logger.info("NLU RAW: %s", nlu)
 
@@ -90,7 +91,7 @@ async def mouth_node(state: AgentState):
         return state
 
     try:
-        ms5 = await call_phraser(brain)
+        ms5 = await call_phraser(brain, language=state.get("language", "english"))
 
         logger.info("PHRASER RAW RESPONSE: %s", ms5)
 
@@ -144,6 +145,7 @@ async def fast_track_node(state: AgentState):
         Intent.BYE:                ("FAREWELL",          "BYE_GOODBYE"),
         Intent.DEAL:               ("ACCEPT",            "DEAL_ACCEPTED"),
         Intent.ASK_PREVIOUS_OFFER: ("INFO",              "PREVIOUS_OFFER"),
+        Intent.ASK_QUESTION:       ("INFO",              "OUT_OF_SCOPE_QUESTION"),
     }
 
     action, response_key = FAST_TRACK_MAP.get(intent, ("INFO", "DEFAULT"))

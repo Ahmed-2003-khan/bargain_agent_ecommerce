@@ -8,3 +8,4 @@ class NLUOutput(BaseModel):
     intent: str
     entities: dict
     sentiment: str
+    language: str   # e.g. "english", "roman_urdu", "urdu", "other"

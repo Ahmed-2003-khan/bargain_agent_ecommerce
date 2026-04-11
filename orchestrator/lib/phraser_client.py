@@ -39,7 +39,7 @@ async def _call_phraser_with_retry(payload: dict) -> dict:
     return resp.json()
 
 
-async def call_phraser(brain_output: dict) -> dict:
+async def call_phraser(brain_output: dict, language: str = "english") -> dict:
     """
     Call the LLM Phraser with:
     - Connection pooling (shared httpx client)
@@ -54,6 +54,7 @@ async def call_phraser(brain_output: dict) -> dict:
         "policy_type": brain_output.get("policy_type", "rule-based"),
         "policy_version": brain_output.get("policy_version", "v1"),
         "decision_metadata": brain_output.get("decision_metadata", {}),
+        "language": language,
     }
 
     logger.info(f"[Phraser] Sending payload: {phraser_payload}")

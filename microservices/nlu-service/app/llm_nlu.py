@@ -39,6 +39,11 @@ class NLUParsed(BaseModel):
         description="The user's emotional sentiment"
     )
 
+    language: Literal["english", "roman_urdu", "urdu", "other"] = Field(
+        default="english",
+        description="The language the user is writing in."
+    )
+
 
 # ---------------------------------------------------------------------------
 # System Prompt
@@ -63,7 +68,13 @@ Price extraction rules:
 Sentiment rules:
 - positive: user seems happy, enthusiastic, or satisfied
 - negative: user seems frustrated, angry, or dissatisfied
-- neutral: everything else"""
+- neutral: everything else
+
+Language detection rules:
+- english: message is written in standard English
+- roman_urdu: message is Urdu written in Roman/Latin letters (e.g. 'aap ka kia hal hai', 'deal karte hain')
+- urdu: message is written in Urdu script (e.g. 'آپ کیسے ہیں')
+- other: any other language (Arabic, Spanish, French, etc.)"""
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +130,12 @@ async def parse(text: str, chain) -> dict:
 
     result: NLUParsed = await chain.ainvoke({"text": text})
 
-    logger.info("[LLM NLU] Parsed: intent=%s, price=%s, sentiment=%s",
-                result.intent, result.price, result.sentiment)
+    logger.info("[LLM NLU] Parsed: intent=%s, price=%s, sentiment=%s, language=%s",
+                result.intent, result.price, result.sentiment, result.language)
 
     return {
         "intent": result.intent,
         "price": result.price,
         "sentiment": result.sentiment,
+        "language": result.language,
     }

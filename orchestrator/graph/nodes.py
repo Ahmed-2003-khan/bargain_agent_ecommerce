@@ -2,6 +2,7 @@ from orchestrator.graph.state import AgentState
 from orchestrator.lib.nlu_client import call_nlu
 from orchestrator.lib.brain_client import call_brain
 from orchestrator.lib.phraser_client import call_phraser
+from orchestrator.lib.intents import Intent
 import logging
 
 logger = logging.getLogger("orchestrator_nodes")
@@ -17,14 +18,14 @@ async def nlu_node(state: AgentState):
         )
 
     except Exception as e:
-        # Safe fallback if NLU fails
+        # Safe fallback if NLU fails — use UNKNOWN intent, not a raw string
         nlu = {
-            "intent": "unknown",
+            "intent": Intent.UNKNOWN,
             "sentiment": "neutral",
             "entities": {}
         }
 
-    state["intent"] = nlu.get("intent", "unknown")
+    state["intent"] = nlu.get("intent", Intent.UNKNOWN)
     state["sentiment"] = nlu.get("sentiment", "neutral")
     state["user_offer"] = nlu.get("entities", {}).get("PRICE", 0)
 
@@ -42,7 +43,7 @@ async def brain_node(state: AgentState):
             mam=state["mam"],
             asking_price=state["asking_price"],
             user_offer=state.get("user_offer", 0),
-            user_intent=state.get("intent", "unknown"),
+            user_intent=state.get("intent", Intent.UNKNOWN),
             user_sentiment=state.get("sentiment", "neutral"),
             session_id=state["session_id"],
             history=state.get("history", []),

@@ -34,9 +34,19 @@ class StrategyInput(BaseModel):
     )
     
     # --- NEW FIELDS (from MS 2: NLU) ---
-    user_intent: str = Field(
+    # Strict Literal — only values returned by the NLU service are accepted.
+    # If a new intent is added to the NLU, add it here too.
+    user_intent: Literal[
+        "GREET",
+        "BYE",
+        "MAKE_OFFER",
+        "DEAL",
+        "ASK_QUESTION",
+        "ASK_PREVIOUS_OFFER",
+        "UNKNOWN",
+    ] = Field(
         ...,
-        description="The user's detected intent (e.g., 'MAKE_OFFER', 'ASK_QUESTION')."
+        description="The user's detected intent — must be an exact NLU output value."
     )
     user_sentiment: str = Field(
         ...,

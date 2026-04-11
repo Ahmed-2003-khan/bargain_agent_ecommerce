@@ -12,16 +12,13 @@ from tenacity import (
 
 from orchestrator.lib.http_pool import get_http_client
 from orchestrator.lib.circuit_breaker import CircuitBreaker, CircuitOpenError
+from orchestrator.lib.intents import Intent
 
 logger = logging.getLogger("brain_client")
 
 STRATEGY_ENGINE_URL = os.getenv("STRATEGY_ENGINE_URL", "http://strategy-engine:8000")
 
-# Map NLU intents to Strategy Engine intents
-INTENT_MAP = {
-    "propose_offer": "MAKE_OFFER",
-    "ask_question": "ASK_QUESTION",
-}
+
 
 # Circuit breaker: opens after 5 failures, recovers after 30s
 _breaker = CircuitBreaker("strategy-engine", failure_threshold=5, recovery_timeout=30)
@@ -67,13 +64,12 @@ async def call_brain(
     if user_offer is None:
         user_offer = 0.0
 
-    mapped_intent = INTENT_MAP.get(user_intent, user_intent)
-
+    # NLU is the source of truth — pass intent directly, no mapping
     payload = {
         "mam": mam,
         "asking_price": asking_price,
         "user_offer": float(user_offer),
-        "user_intent": mapped_intent,
+        "user_intent": user_intent,
         "user_sentiment": user_sentiment,
         "session_id": session_id,
         "history": history,
@@ -81,7 +77,7 @@ async def call_brain(
 
     logger.info(
         "[MS4] Sending to Brain: session=%s, intent=%s, offer=%s",
-        session_id, mapped_intent, user_offer,
+        session_id, user_intent, user_offer,
     )
 
     try:

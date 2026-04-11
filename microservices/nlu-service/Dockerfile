@@ -1,13 +1,14 @@
+# Slim pip-based build — no Poetry overhead (fixes Code Review 6.3)
 FROM python:3.11-slim
+
 WORKDIR /app
 
-RUN pip install --no-cache-dir poetry
+# Install dependencies first (Docker layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY pyproject.toml poetry.lock* ./
+# Copy application code
 COPY . .
-
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --no-root
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

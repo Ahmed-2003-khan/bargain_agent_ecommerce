@@ -156,13 +156,18 @@ async def fast_track_node(state: AgentState):
         last_user_offer = None
         for turn in reversed(history):
             if not last_bot_offer and turn.get("from") in ("ina", "bot", "assistant"):
-                if turn.get("brain_key") in ("STANDARD_COUNTER", "COUNTER_FINAL_OFFER", "ACCEPT_FINAL"):
-                    last_bot_offer = turn.get("counter_price")
+                old_offer = turn.get("bot_offer")
+                if old_offer is not None:
+                    last_bot_offer = old_offer
+
             if not last_user_offer and turn.get("from") == "user":
-                last_user_offer = turn.get("text")
+                old_offer = turn.get("user_offer")
+                if old_offer and old_offer > 0:
+                    last_user_offer = old_offer
+
         decision_metadata = {
-            "bot_offer": last_bot_offer or "N/A",
-            "user_offer": last_user_offer or "N/A",
+            "bot_offer": f"${last_bot_offer:,.0f}" if last_bot_offer else "N/A",
+            "user_offer": f"${last_user_offer:,.0f}" if last_user_offer else "N/A",
         }
 
     # Build a mock brain output shaped exactly like Strategy Engine output

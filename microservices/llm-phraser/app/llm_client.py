@@ -37,7 +37,7 @@ async def generate_llm_response(
             ],
             model="llama-3.3-70b-versatile", # Fast and capable model
             temperature=1,
-            max_tokens=128,
+            max_tokens=512,
         )
         
         # 3. Parse and return the response

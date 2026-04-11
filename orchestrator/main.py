@@ -266,11 +266,19 @@ async def chat_endpoint(
             # --------------------------------------------
             # Save updated history back to Redis
             # --------------------------------------------
+            
+            # Retroactively add user_offer to the last user message now that NLU has parsed it
+            user_offer = result.get("user_offer") if result else None
+            # Update the last element (which is the user message we just appended)
+            if history and history[-1].get("from") == "user":
+                history[-1]["user_offer"] = user_offer
+
             history.append({
                 "from": "ina",
                 "text": ai_response,
                 "brain_action": brain_action,
                 "brain_key": brain_key,
+                "bot_offer": result.get("counter_price") if result else None
             })
 
             updated_session = latest_session.model_dump()

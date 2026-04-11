@@ -116,7 +116,69 @@ async def mouth_node(state: AgentState):
         state["final_response"] = response_text
 
     except Exception as e:
-        print("Mouth Error:", e)
+        logger.exception("Mouth Error: %s", e)
         state["final_response"] = "System is thinking. Please try again."
 
     return state
+
+
+# ---------- FAST TRACK NODE ----------
+async def fast_track_node(state: AgentState):
+    """
+    Handles conversational intents that do NOT need the Strategy Engine.
+
+    Routes these intents directly to the Phraser using matching response_keys:
+        GREET              → GREET_HELLO
+        BYE                → BYE_GOODBYE
+        DEAL               → DEAL_ACCEPTED
+        ASK_PREVIOUS_OFFER → PREVIOUS_OFFER   (passes metadata from history)
+
+    Builds a mock brain dict so the Phraser (mouth_node) can consume it
+    using the same code path — no special handling needed in mouth_node.
+    """
+    intent = state.get("intent", Intent.UNKNOWN)
+
+    # Map each fast-track intent to its Phraser response_key
+    FAST_TRACK_MAP = {
+        Intent.GREET:              ("GREETING",          "GREET_HELLO"),
+        Intent.BYE:                ("FAREWELL",          "BYE_GOODBYE"),
+        Intent.DEAL:               ("ACCEPT",            "DEAL_ACCEPTED"),
+        Intent.ASK_PREVIOUS_OFFER: ("INFO",              "PREVIOUS_OFFER"),
+    }
+
+    action, response_key = FAST_TRACK_MAP.get(intent, ("INFO", "DEFAULT"))
+
+    # For PREVIOUS_OFFER: extract last known user and bot prices from history
+    decision_metadata = {}
+    if intent == Intent.ASK_PREVIOUS_OFFER:
+        history = state.get("history", [])
+        last_bot_offer = None
+        last_user_offer = None
+        for turn in reversed(history):
+            if not last_bot_offer and turn.get("from") in ("ina", "bot", "assistant"):
+                if turn.get("brain_key") in ("STANDARD_COUNTER", "COUNTER_FINAL_OFFER", "ACCEPT_FINAL"):
+                    last_bot_offer = turn.get("counter_price")
+            if not last_user_offer and turn.get("from") == "user":
+                last_user_offer = turn.get("text")
+        decision_metadata = {
+            "bot_offer": last_bot_offer or "N/A",
+            "user_offer": last_user_offer or "N/A",
+        }
+
+    # Build a mock brain output shaped exactly like Strategy Engine output
+    mock_brain = {
+        "action":            action,
+        "response_key":      response_key,
+        "counter_price":     None,
+        "policy_type":       "fast-track",
+        "policy_version":    "1.0",
+        "decision_metadata": decision_metadata,
+    }
+
+    state["brain_action"] = action
+    state["response_key"] = response_key
+    state["_brain_raw"]   = mock_brain
+
+    logger.info("FAST TRACK: intent=%s → action=%s, key=%s", intent, action, response_key)
+    return state
+

@@ -18,10 +18,10 @@ class PhraserInput(BaseModel):
     impossible for 'mam' or other secrets to be passed in.
     """
     
-    # The command from MS 4 (The Brain)
-    action: Literal["ACCEPT", "REJECT", "COUNTER"] = Field(
+    # The command from MS 4 (The Brain) or the Orchestrator Fast-Track Router
+    action: Literal["ACCEPT", "REJECT", "COUNTER", "GREETING", "FAREWELL", "INFO"] = Field(
         ..., 
-        description="The negotiation action to take."
+        description="The negotiation or conversational action to take."
     )
     
     # The key for this service to select the right prompt

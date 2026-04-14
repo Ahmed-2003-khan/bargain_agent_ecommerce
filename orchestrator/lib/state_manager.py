@@ -18,6 +18,7 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
+REDIS_URL = os.getenv("REDIS_URL")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")  # docker compose service name
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
@@ -31,12 +32,15 @@ def get_redis_client() -> redis.Redis:
     """Return a singleton redis client instance (async)."""
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            db=REDIS_DB,
-            decode_responses=True,  # returns strings not bytes
-        )
+        if REDIS_URL:
+            _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        else:
+            _redis_client = redis.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                db=REDIS_DB,
+                decode_responses=True,  # returns strings not bytes
+            )
     return _redis_client
 
 

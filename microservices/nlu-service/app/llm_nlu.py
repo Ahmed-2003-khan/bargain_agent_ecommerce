@@ -26,7 +26,7 @@ class NLUParsed(BaseModel):
 
     intent: Literal[
         "GREET", "BYE", "MAKE_OFFER", "DEAL",
-        "ASK_QUESTION", "ASK_PREVIOUS_OFFER", "UNKNOWN"
+        "ASK_QUESTION", "ASK_PREVIOUS_OFFER", "UNKNOWN", "INVALID"
     ] = Field(description="The user's intent classification")
 
     price: Optional[float] = Field(
@@ -44,24 +44,41 @@ class NLUParsed(BaseModel):
         description="The language the user is writing in."
     )
 
+    error_message: Optional[str] = Field(
+        default=None,
+        description="If intent is INVALID, explain politely why the input was not accepted."
+    )
+
 
 # ---------------------------------------------------------------------------
 # System Prompt
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are a precise NLU parser for a price negotiation chatbot.
-Classify the user's message and extract structured data.
+SYSTEM_PROMPT = """You are a strict NLU parser and offer validator for a price negotiation chatbot.
+Your job is BOTH to classify intent AND to act as a smart gatekeeper — blocking any offer that is not a genuine, usable monetary value.
 
 Intent classification rules:
 - GREET: user is greeting (hi, hello, hey, good morning, etc.)
 - BYE: user is saying goodbye (bye, see you, later, goodbye, etc.)
-- MAKE_OFFER: user is explicitly proposing a specific price (e.g. "I'll give you 150", "how about $200", "my offer is 180 bucks", "a hundred and fifty")
+- MAKE_OFFER: user is proposing a VALID price — must be a clear, positive, realistic monetary number (e.g. "I'll give you 150", "how about $200", "a hundred bucks")
 - DEAL: user is accepting/agreeing to a price (deal, accepted, agreed, I agree, let's do it, etc.)
+- INVALID: use this when the offer or input is not genuinely usable. This includes:
+    * Mathematical expressions or ratios (8/3, 4+4, x=2)
+    * Negative or zero amounts (-500, 0)
+    * Non-monetary offers ("I'll pay with my car", "my soul")
+    * Gibberish or random characters ("asdfgh", "$$$$$")
+    * Unrealistically large numbers above 10 million
+    * Any other input that cannot be acted upon as a real offer
+  When selecting INVALID, you MUST write a unique, polite, contextual error_message that explains exactly what was wrong and guides the user to fix it. Never use a generic or repetitive message.
 - ASK_PREVIOUS_OFFER: user is asking about a previous/earlier offer or counter
 - ASK_QUESTION: user is asking any other question about the product
-- UNKNOWN: anything else that doesn't fit
+- UNKNOWN: cannot understand, but not clearly invalid
+
+A pre-check hint may be provided in brackets at the start of the message like [HINT: math_detected].
+If a hint is provided, use it as strong evidence but still write a UNIQUE, CONTEXT-AWARE error_message based on the actual message content.
 
 Price extraction rules:
 - ONLY set price when intent is MAKE_OFFER
+- Extract any explicitly mentioned price format into just the number, removing commas. Do not infer prices that aren't stated.
 - Handle natural language: "a hundred and fifty" → 150.0, "1.5k" → 1500.0
 - If NO price offer is being made, price MUST be null
 
@@ -74,7 +91,8 @@ Language detection rules:
 - english: message is written in standard English
 - roman_urdu: message is Urdu written in Roman/Latin letters (e.g. 'aap ka kia hal hai', 'deal karte hain')
 - urdu: message is written in Urdu script (e.g. 'آپ کیسے ہیں')
-- other: any other language (Arabic, Spanish, French, etc.)"""
+- other: any other language (Arabic, Spanish, French, etc.)
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +100,7 @@ Language detection rules:
 # ---------------------------------------------------------------------------
 prompt = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", "User message: {text}"),
+    ("human", "{text}"),
 ])
 
 
@@ -116,19 +134,28 @@ def build_nlu_chain(groq_api_key: str):
     return chain
 
 
-async def parse(text: str, chain) -> dict:
+async def parse(text: str, chain, hint: str = "") -> dict:
     """
     Run the NLU chain on the user's text.
 
+    Args:
+        text:  The raw user message.
+        chain: The LangChain chain to invoke.
+        hint:  Optional Layer-1 pre-check reason (e.g. 'math_detected').
+               Prepended to the message so the LLM uses it as strong evidence.
+
     Returns:
-        dict with keys: intent (str), price (float|None), sentiment (str)
+        dict with keys: intent, price, sentiment, language, error_message
 
     Raises:
         Exception on any LangChain/Groq failure → caller uses regex fallback.
     """
-    logger.info("[LLM NLU] Parsing: %r", text)
+    # Prepend hint if Layer 1 detected something
+    annotated_text = f"[HINT: {hint}] User message: {text}" if hint else f"User message: {text}"
 
-    result: NLUParsed = await chain.ainvoke({"text": text})
+    logger.info("[LLM NLU] Parsing: %r (hint=%r)", text, hint)
+
+    result: NLUParsed = await chain.ainvoke({"text": annotated_text})
 
     logger.info("[LLM NLU] Parsed: intent=%s, price=%s, sentiment=%s, language=%s",
                 result.intent, result.price, result.sentiment, result.language)
@@ -138,4 +165,5 @@ async def parse(text: str, chain) -> dict:
         "price": result.price,
         "sentiment": result.sentiment,
         "language": result.language,
+        "error_message": result.error_message,
     }

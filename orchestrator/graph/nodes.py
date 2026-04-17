@@ -29,6 +29,10 @@ async def nlu_node(state: AgentState):
     state["sentiment"] = nlu.get("sentiment", "neutral")
     state["user_offer"] = nlu.get("entities", {}).get("PRICE", 0)
     state["language"] = nlu.get("language", "english")
+    state["error_message"] = nlu.get("error_message")
+
+    if state["intent"] == Intent.INVALID:
+        state["final_response"] = state["error_message"] or "I cannot process that input, please try again."
 
     logger.info("NLU RAW: %s", nlu)
 

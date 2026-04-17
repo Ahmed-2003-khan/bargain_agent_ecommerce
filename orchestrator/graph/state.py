@@ -13,6 +13,7 @@ class AgentState(TypedDict, total=False):
     sentiment: str
     user_offer: float
     language: str   # detected language: english, roman_urdu, urdu, other
+    error_message: str
 
     # Brain outputs
     brain_action: str

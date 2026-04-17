@@ -131,14 +131,38 @@ async def parse(input: NLUInput):
     """
     Parse user text into structured NLU output.
 
-    Primary:  LangChain + Groq structured output (Pydantic-enforced)
-    Fallback: Regex pipeline if LLM call fails for any reason
+    Layer 1: Python pre-check — fast, zero-cost detection of obvious invalid inputs.
+             Passes a descriptive hint to the LLM rather than hard-coding a fixed message.
+    Layer 2: LLM — classifies intent and generates a unique, contextual error message.
     """
+    # ------------------------------------------------------------------
+    # LAYER 1: Python Pre-Check (Zero Token Cost)
+    # Detects obvious invalids and gives LLM a hint to generate a smart,
+    # dynamic error message. Does NOT hard-code the final response.
+    # ------------------------------------------------------------------
+    text = input.text.strip()
+    hint = ""
+
+    if not text:
+        hint = "empty_input"
+    elif re.search(r'\d+\s*[\+\-\*/]\s*\d+', text) or re.search(r'\b[a-z]\s*=\s*\d', text, re.IGNORECASE):
+        hint = "math_expression_detected"
+    elif re.search(r'-\s*\$?\s*\d+', text):
+        hint = "negative_number_detected"
+    elif not re.search(r'[a-zA-Z0-9]', text):
+        hint = "gibberish_no_alphanumeric"
+
+    if hint:
+        logger.info("[NLU Layer 1] Pre-check flagged input. Hint: %s", hint)
+
+    # ------------------------------------------------------------------
+    # LAYER 2: LLM Smart Judge (passes hint for contextual error message)
+    # ------------------------------------------------------------------
     chain = app.state.nlu_chain
 
     if chain is not None:
         try:
-            result = await llm_nlu.parse(input.text, chain)
+            result = await llm_nlu.parse(input.text, chain, hint=hint)
         except Exception as e:
             logger.warning("[NLU] LLM parse failed — using regex fallback. Error: %s", e)
             result = _regex_fallback(input.text)
@@ -151,4 +175,5 @@ async def parse(input: NLUInput):
         entities={"PRICE": result["price"]},
         sentiment=result["sentiment"],
         language=result.get("language", "english"),
+        error_message=result.get("error_message"),
     )

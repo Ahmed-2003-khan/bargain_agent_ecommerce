@@ -1,4 +1,4 @@
-from langgraph.graph import StateGraph
+from langgraph.graph import StateGraph, END
 from orchestrator.graph.state import AgentState
 from orchestrator.graph.nodes import nlu_node, brain_node, mouth_node, fast_track_node
 from orchestrator.lib.intents import Intent
@@ -26,6 +26,9 @@ def route_after_nlu(state: AgentState) -> str:
         MAKE_OFFER, ASK_QUESTION, UNKNOWN (and any unexpected value)
     """
     intent = state.get("intent", Intent.UNKNOWN)
+
+    if intent == Intent.INVALID:
+        return "__end__"
 
     if intent in FAST_TRACK_INTENTS:
         return "fast_track"

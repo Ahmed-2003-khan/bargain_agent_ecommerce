@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 class NLUInput(BaseModel):
     text: str
@@ -9,3 +10,4 @@ class NLUOutput(BaseModel):
     entities: dict
     sentiment: str
     language: str   # e.g. "english", "roman_urdu", "urdu", "other"
+    error_message: Optional[str] = None

@@ -33,6 +33,9 @@ class Intent:
     # Anything the NLU couldn't classify
     UNKNOWN: Final = "UNKNOWN"
 
+    # User input is gibberish, math, or completely invalid
+    INVALID: Final = "INVALID"
+
     # Intents that require the negotiation Strategy Engine
     NEGOTIATION_INTENTS: Final = frozenset({MAKE_OFFER, DEAL, ASK_PREVIOUS_OFFER})
 

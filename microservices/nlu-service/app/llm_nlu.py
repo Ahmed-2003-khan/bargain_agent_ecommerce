@@ -73,8 +73,8 @@ Intent classification rules:
 - ASK_QUESTION: user is asking any other question about the product
 - UNKNOWN: cannot understand, but not clearly invalid
 
-A pre-check hint may be provided in brackets at the start of the message like [HINT: math_detected].
-If a hint is provided, use it as strong evidence but still write a UNIQUE, CONTEXT-AWARE error_message based on the actual message content.
+A pre-check hint may be provided in brackets at the start of the message like [HINT: math_expression_detected].
+If ANY hint is provided, you MUST classify the intent as INVALID and write a UNIQUE, CONTEXT-AWARE error_message based on the hint and the actual message content. Never override a hint.
 
 Price extraction rules:
 - ONLY set price when intent is MAKE_OFFER

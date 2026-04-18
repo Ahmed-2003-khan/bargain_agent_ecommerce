@@ -1,0 +1,109 @@
+{
+  "predict.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "user_message": "I'll give you 1500",
+        "reasoning": "The user is making a clear monetary offer of 1500. The amount is realistic and positive, indicating a willingness to negotiate.",
+        "intent": "MAKE_OFFER",
+        "price": "1500.0",
+        "sentiment": "positive",
+        "language": "english",
+        "error_message": "None"
+      },
+      {
+        "augmented": true,
+        "user_message": "I'll give you 1.5k",
+        "reasoning": "The user is making a clear monetary offer by stating \"I'll give you 1.5k,\" which translates to 1500.0. This is a positive and realistic offer.",
+        "intent": "MAKE_OFFER",
+        "price": "1500.0",
+        "sentiment": "positive",
+        "language": "english",
+        "error_message": "None"
+      },
+      {
+        "augmented": true,
+        "user_message": "Bhai meri jaan, 800 final hai",
+        "reasoning": "The user is making a clear monetary offer by stating \"800 final,\" which indicates a willingness to pay 800 as the final price.",
+        "intent": "MAKE_OFFER",
+        "price": "800.0",
+        "sentiment": "positive",
+        "language": "roman_urdu",
+        "error_message": "None"
+      },
+      {
+        "augmented": true,
+        "user_message": "Bhai 2000 thora zayada hai, 1700?",
+        "reasoning": "The user is negotiating a price and suggests a counter-offer of 1700 after stating that 2000 is too high. This indicates a clear monetary offer.",
+        "intent": "MAKE_OFFER",
+        "price": "1700.0",
+        "sentiment": "neutral",
+        "language": "roman_urdu",
+        "error_message": "None"
+      },
+      {
+        "augmented": true,
+        "user_message": "I will pay you with a used bicycle",
+        "reasoning": "The user is offering a non-monetary item (a used bicycle) instead of a monetary amount, which does not qualify as a valid offer in a price negotiation context.",
+        "intent": "INVALID",
+        "price": "None",
+        "sentiment": "neutral",
+        "language": "english",
+        "error_message": "Please provide a monetary offer instead of an item."
+      },
+      {
+        "augmented": true,
+        "user_message": "Evaluate x = 600 + 400",
+        "reasoning": "The user message contains a mathematical expression rather than a monetary offer. This falls under the category of invalid input as it cannot be acted upon as a real offer.",
+        "intent": "INVALID",
+        "price": "None",
+        "sentiment": "neutral",
+        "language": "english",
+        "error_message": "Please provide a clear monetary offer instead of a mathematical expression."
+      }
+    ],
+    "signature": {
+      "instructions": "You are a strict NLU parser and offer validator for a price negotiation\nchatbot. Given a user message, extract intent, price, sentiment, language,\nand an error message when the input is invalid.\n\nINTENT RULES — pick exactly one:\n- GREET            : user is greeting (hi, hello, salam, etc.)\n- BYE              : user is saying goodbye (bye, khuda hafiz, etc.)\n- MAKE_OFFER       : user proposes a clear, positive, realistic monetary\n                     amount. Examples: \"I'll give you 150\", \"1.5k\", \"800 final\"\n- DEAL             : user accepts/agrees to a price (deal, agreed, theek hai deal)\n- ASK_PREVIOUS_OFFER: user asks about a prior offer or counter-offer\n- ASK_QUESTION     : user asks anything else about the product/service\n- INVALID          : input cannot be acted on as a real offer. Covers:\n                       * math expressions or equations (8/3, x=600+400)\n                       * negative or zero amounts (-500)\n                       * non-monetary offers (bicycle, soul)\n                       * gibberish or random characters\n                       * unrealistically large numbers (above 10 million)\n                       * vague messages with no actionable price\n\nPRICE RULES:\n- Set ONLY when intent is MAKE_OFFER, otherwise return the string \"None\"\n- Convert natural language: \"a hundred and fifty\"->150.0, \"1.5k\"->1500.0\n- Strip commas: \"1,500\"->1500.0\n- Never infer a price that is not explicitly stated\n\nSENTIMENT RULES:\n- positive : happy, enthusiastic, agreeable\n- negative : frustrated, angry, complaining\n- neutral  : everything else\n\nLANGUAGE RULES — detect the script/language of the user message:\n- english    : standard English\n- roman_urdu : Urdu written in Latin letters (bhai, theek hai, mein, karo)\n- urdu       : Urdu script (آپ, کیسے)\n- other      : anything else (Arabic, Spanish, gibberish with no clear language)\n\nERROR MESSAGE RULES:\n- ONLY set when intent is INVALID\n- Must be written in the SAME language as the user message:\n    * roman_urdu input  → Roman Urdu error message\n    * english input     → English error message\n- Must be polite, specific, and guide the user toward a valid offer\n- Never use a generic or repetitive message\n- Return the string \"None\" when not applicable",
+      "fields": [
+        {
+          "prefix": "User Message:",
+          "description": "The raw message from the user in the negotiation chat."
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Intent:",
+          "description": "One of: GREET, BYE, MAKE_OFFER, DEAL, ASK_PREVIOUS_OFFER, ASK_QUESTION, INVALID"
+        },
+        {
+          "prefix": "Price:",
+          "description": "A positive float as a string (e.g. '1500.0') when intent is MAKE_OFFER. The string 'None' for all other intents."
+        },
+        {
+          "prefix": "Sentiment:",
+          "description": "One of: positive, neutral, negative"
+        },
+        {
+          "prefix": "Language:",
+          "description": "One of: english, roman_urdu, urdu, other"
+        },
+        {
+          "prefix": "Error Message:",
+          "description": "A polite, specific error in the user's own language when intent is INVALID. The string 'None' otherwise."
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.11",
+      "dspy": "3.1.3",
+      "cloudpickle": "3.1"
+    }
+  }
+}

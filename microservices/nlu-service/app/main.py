@@ -2,41 +2,46 @@
 NLU Service (MS2) — INA Negotiation Chatbot
 
 NLU Pipeline:
-    Primary:  LangChain + Groq (llama-3.1-8b-instant) with structured output
-              → Handles natural language prices, context-aware intent
-    Fallback: Regex pipeline (same as original)
-              → Kicks in if Groq/LangChain is unavailable
+    Primary:  DSPy + Groq (llama-3.3-70b-versatile) with BootstrapFewShot
+              compiled program — handles all validation end-to-end.
+    Fallback: Minimal deterministic fallback for user-facing resilience.
+              Returns UNKNOWN intent with HTTP 200 so the caller can degrade
+              gracefully rather than showing a hard error to the user.
 """
 
 import os
-import re
 import logging
+import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .schemas import NLUInput, NLUOutput
-from . import llm_nlu
+from . import dspy_nlu
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------- Config ----------------------
 INTERNAL_KEY = os.getenv("INTERNAL_SERVICE_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
 
 
 # ---------------------- Lifespan ----------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Build the LangChain NLU chain once on startup."""
-    if not GROQ_API_KEY:
-        logger.error("FATAL: GROQ_API_KEY is not set. LLM NLU will always fallback to regex.")
-        app.state.nlu_chain = None
+    """Build the DSPy NLU module once on startup."""
+    if not OPENAI_API_KEY and not GROQ_API_KEY:
+        logger.error(
+            "FATAL: Neither OPENAI_API_KEY nor GROQ_API_KEY is set. "
+            "NLU will always use the deterministic fallback."
+        )
+        app.state.nlu_module = None
     else:
-        app.state.nlu_chain = llm_nlu.build_nlu_chain(GROQ_API_KEY)
-        logger.info("NLU service started — LangChain + Groq chain initialized.")
+        app.state.nlu_module = dspy_nlu.build_nlu_module(OPENAI_API_KEY, GROQ_API_KEY)
+        logger.info("NLU service started — DSPy module initialized.")
     yield
     logger.info("NLU service shutting down.")
 
@@ -47,10 +52,6 @@ app = FastAPI(title="NLU Service (MS2)", lifespan=lifespan)
 # ---------------------- Auth Middleware ----------------------
 @app.middleware("http")
 async def verify_internal_key(request: Request, call_next):
-    """
-    Verify that incoming requests carry the correct X-Internal-Key header.
-    Health check and docs endpoints are exempt.
-    """
     if request.url.path in ("/health", "/", "/docs", "/openapi.json"):
         return await call_next(request)
 
@@ -72,116 +73,76 @@ async def health_check():
 
 
 # =====================================================
-# 🔁 Regex Fallback (preserved from original)
-# Used when the LLM call fails for any reason.
+# Deterministic Fallback
+# Used only when DSPy/Groq is completely unavailable.
+# Returns a safe, minimal result that lets the caller
+# degrade gracefully instead of crashing the user flow.
 # =====================================================
-def _regex_fallback(text: str) -> dict:
+def _deterministic_fallback(text: str) -> dict:
     """
-    Original regex-based NLU pipeline.
-    Returns same shape as llm_nlu.parse() result.
+    Minimal rule-based fallback.  Intentionally conservative:
+    - Detects a plain numeric offer (2+ digits) → MAKE_OFFER
+    - Detects simple greet/bye/deal keywords
+    - Everything else → ASK_QUESTION (safe neutral intent)
+    No INVALID classification here — that requires LLM reasoning.
     """
-    text_lower = text.lower()
+    t = text.lower().strip()
 
-    # --- Price Extraction (improved: requires 2+ digits) ---
-    price_match = re.search(r"\$?\s*(\d{2,}(?:[.,]\d+)?)", text_lower)
-    price = float(price_match.group(1).replace(",", "")) if price_match else None
+    greetings  = r"\b(hi|hello|hey|salam|salam alaikum)\b"
+    farewells  = r"\b(bye|goodbye|khuda hafiz|alvida)\b"
+    deal_words = r"\b(deal|agreed|accept|theek hai deal|done)\b"
+    price_pat  = r"\$?\s*(\d{2,}(?:[.,]\d+)?)"
 
-    # --- Intent Detection ---
-    def contains_word(t, words):
-        pattern = r"\b(" + "|".join(re.escape(w) for w in words) + r")\b"
-        return re.search(pattern, t) is not None
-
-    greetings = ["hi", "hello", "hey"]
-    farewells = ["bye", "goodbye", "see you", "later"]
-    deal_words = ["deal", "accept", "agree"]
-    prev_queries = ["earlier price", "previous offer", "last offer", "previous counter"]
-
-    if contains_word(text_lower, greetings):
-        intent = "GREET"
-    elif contains_word(text_lower, farewells):
-        intent = "BYE"
-    elif any(w in text_lower for w in deal_words):
-        intent = "DEAL"
-    elif any(w in text_lower for w in prev_queries):
-        intent = "ASK_PREVIOUS_OFFER"
-    elif price:
-        intent = "MAKE_OFFER"
+    if re.search(greetings, t):
+        intent, price = "GREET", None
+    elif re.search(farewells, t):
+        intent, price = "BYE", None
+    elif re.search(deal_words, t):
+        intent, price = "DEAL", None
     else:
-        intent = "ASK_QUESTION"
+        m = re.search(price_pat, t)
+        if m:
+            intent = "MAKE_OFFER"
+            price  = float(m.group(1).replace(",", ""))
+        else:
+            intent, price = "ASK_QUESTION", None
 
-    # --- Sentiment Detection ---
-    negative_words = ["high", "expensive", "unfair", "bad", "angry", "upset", "worst", "frustrated"]
-    positive_words = ["good", "great", "happy", "perfect", "amazing", "love"]
-
-    if any(w in text_lower for w in negative_words):
-        sentiment = "negative"
-    elif any(w in text_lower for w in positive_words):
-        sentiment = "positive"
-    else:
-        sentiment = "neutral"
-
-    return {"intent": intent, "price": price, "sentiment": sentiment}
+    return {
+        "intent": intent,
+        "price": price,
+        "sentiment": "neutral",
+        "language": "english",   # can't detect language without LLM
+        "error_message": None,
+    }
 
 
 # =====================================================
-# 🔍 PARSE ENDPOINT
+# PARSE ENDPOINT  — contract unchanged
 # =====================================================
 @app.post("/parse", response_model=NLUOutput)
 async def parse(input: NLUInput):
     """
     Parse user text into structured NLU output.
 
-    Layer 1: Python pre-check — fast, zero-cost detection of obvious invalid inputs.
-             Passes a descriptive hint to the LLM rather than hard-coding a fixed message.
-    Layer 2: LLM — classifies intent and generates a unique, contextual error message.
+    All validation (math, barter, gibberish, negative numbers, etc.)
+    is handled end-to-end by the DSPy module — no Layer 1 pre-checks.
     """
-    # ------------------------------------------------------------------
-    # LAYER 1: Python Pre-Check (Zero Token Cost)
-    # Detects obvious invalids and gives LLM a hint to generate a smart,
-    # dynamic error message. Does NOT hard-code the final response.
-    # ------------------------------------------------------------------
-    text = input.text.strip()
-    hint = ""
+    module = app.state.nlu_module
 
-    if not text:
-        hint = "empty_input"
-    elif re.search(r'\d+\s*[\+\-\*/]\s*\d+', text) or re.search(r'\b(divide|divided by|plus|minus|times|multiplied by|fraction)\b', text, re.IGNORECASE) or re.search(r'\b[a-z]\s*=\s*\d', text, re.IGNORECASE):
-        hint = "math_expression_detected"
-    elif re.search(r'-\s*\$?\s*\d+', text):
-        hint = "negative_number_detected"
-    elif not re.search(r'[a-zA-Z0-9]', text):
-        hint = "gibberish_no_alphanumeric"
-
-    if hint:
-        logger.info("[NLU Layer 1] Pre-check flagged input. Hint: %s", hint)
-
-    # ------------------------------------------------------------------
-    # LAYER 2: LLM Smart Judge (passes hint for contextual error message)
-    # ------------------------------------------------------------------
-    chain = app.state.nlu_chain
-
-    if chain is not None:
+    if module is not None:
         try:
-            result = await llm_nlu.parse(input.text, chain, hint=hint)
-            # --- CAVE-MAN ULTRA: Layer 1 override ---
-            # If our fast pre-check found an issue, we FORCE the intent to INVALID.
-            # This prevents the LLM from "being too smart" and trying to process math.
-            if hint:
-                logger.warning("[NLU Layer 1 Override] Hint was present (%s). Forcing INVALID.", hint)
-                result["intent"] = "INVALID"
-                if not result.get("error_message"):
-                    result["error_message"] = "I'm sorry, I couldn't process that input. Please provide a clear price."
+            result = await dspy_nlu.parse(input.text, module)
         except Exception as e:
-            logger.warning("[NLU] LLM parse failed — using regex fallback. Error: %s", e)
-            result = _regex_fallback(input.text)
+            logger.warning("[NLU] DSPy parse failed — using fallback. Error: %s", e)
+            result = _deterministic_fallback(input.text)
     else:
-        logger.warning("[NLU] No LLM chain available — using regex fallback.")
-        result = _regex_fallback(input.text)
+        logger.warning("[NLU] No DSPy module available — using fallback.")
+        result = _deterministic_fallback(input.text)
 
     return NLUOutput(
         intent=result["intent"],
-        entities={"PRICE": result["price"] if result["intent"] != "INVALID" else None},
+        entities={"PRICE": result["price"]},
         sentiment=result["sentiment"],
-        language=result.get("language", "english"),
+        language=result["language"],
         error_message=result.get("error_message"),
     )

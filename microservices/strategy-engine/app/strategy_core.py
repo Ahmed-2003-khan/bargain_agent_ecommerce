@@ -1,189 +1,211 @@
-# Purpose: Houses the core business logic for the negotiation strategy.
-# (Upgraded to v1.2.2 - Explicit Offer Counting)
+# negotiation_engine_v2.py
+# Strategy Version: 2.0.0 — Psychological + Pattern-Aware
 
 from .schemas import StrategyInput, StrategyOutput
 import logging
 import math
 
-# Set up a logger for this module
 logger = logging.getLogger(__name__)
 
-# --- Policy Configuration ---
-POLICY_VERSION = "1.3.3"
+POLICY_VERSION = "2.0.0"
 
-# Thresholds
+# --- Thresholds ---
 LOWBALL_THRESHOLD_PERCENT = 0.70
-SENTIMENT_ACCEPT_THRESHOLD_PERCENT = 0.95 
+MAM_ACCEPT_THRESHOLD = 1.00          # Accept at or above MAM
+SENTIMENT_ACCEPT_THRESHOLD = 0.95   # Accept slightly below MAM if user is frustrated
 
-# New: Offer Count Threshold
-# We trigger "Final Offer" logic if the user has made at least this many offers
-# (including the current one).
-USER_OFFER_THRESHOLD = 4 
+# --- Concession Ladder (Diminishing Returns) ---
+# Each entry is (min_offer_number, concession_factor)
+# As offers increase, the bot gives less and less away each round.
+CONCESSION_LADDER = [
+    (1, 0.35),   # Offer 1–2: Give 35% of the gap (generous opening)
+    (3, 0.20),   # Offer 3–4: Give 20% of the gap (slowing down)
+    (5, 0.10),   # Offer 5+:  Give only 10% (near-final resistance)
+]
+FINAL_OFFER_FACTOR = 0.50            # When triggering FINAL, split remaining gap
 
-# --- NEW CONCESSION FACTORS (Tougher Logic) ---
-# Standard: Only drop 25% of the gap (was 50%)
-STANDARD_CONCESSION_FACTOR = 0.25 
+# --- Pattern Detection ---
+STALL_DELTA_PERCENT = 0.01           # If user's offer moves <1% of asking price = stalling
+RAPID_CLOSE_PERCENT = 0.15          # If user jumps >15% of gap in one move = serious buyer
 
-# Final: Meet halfway (was 75%)
-FINAL_CONCESSION_FACTOR = 0.50 
-# ----------------------------------------------
+# --- Offer Count ---
+FINAL_OFFER_THRESHOLD = 5
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def get_last_bot_offer(input_data: StrategyInput) -> float:
-    """
-    Helper function to find the most recent price offered by the Bot.
-    """
     for turn in reversed(input_data.history):
         role = turn.get("role", "").lower()
-        if role == "assistant" or role == "bot":
-            if "counter_price" in turn and turn["counter_price"] is not None:
-                return float(turn["counter_price"])
-            if "offer" in turn and turn["offer"] is not None:
-                return float(turn["offer"])
+        if role in ("assistant", "bot"):
+            for key in ("counter_price", "offer"):
+                if turn.get(key) is not None:
+                    return float(turn[key])
     return input_data.asking_price
 
+
+def get_concession_factor(offer_number: int) -> float:
+    """Returns a diminishing concession factor based on offer number."""
+    factor = CONCESSION_LADDER[0][1]
+    for min_offer, f in CONCESSION_LADDER:
+        if offer_number >= min_offer:
+            factor = f
+    return factor
+
+
 def count_user_offers(history: list) -> int:
+    return sum(1 for t in history if t.get("role", "").lower() == "user")
+
+
+def get_user_offer_history(history: list) -> list[float]:
+    """Returns all user offer prices in chronological order."""
+    return [
+        float(t["offer"])
+        for t in history
+        if t.get("role", "").lower() == "user" and t.get("offer") is not None
+    ]
+
+
+def detect_pattern(user_offer: float, offer_history: list[float], asking_price: float) -> str:
     """
-    Counts how many times the user has made a move in the history.
+    Detects negotiation patterns:
+    - 'stalling': user barely moving
+    - 'rapid_close': user jumped a large amount
+    - 'normal': standard progression
     """
-    count = 0
-    for turn in history:
-        if turn.get("role", "").lower() == "user":
-            count += 1
-    return count
+    if not offer_history:
+        return "normal"
+
+    last_offer = offer_history[-1]
+    delta = user_offer - last_offer
+
+    stall_threshold = asking_price * STALL_DELTA_PERCENT
+    if delta < stall_threshold:
+        return "stalling"
+
+    if offer_history:
+        # Calculate how much of the remaining gap the user just closed
+        old_gap = asking_price - last_offer  # rough proxy
+        if old_gap > 0 and (delta / old_gap) > RAPID_CLOSE_PERCENT:
+            return "rapid_close"
+
+    return "normal"
+
+
+# ── Main Decision Function ────────────────────────────────────────────────────
 
 def make_decision(input_data: StrategyInput) -> StrategyOutput:
-    
-    logger.info(f"Processing decision for session: {input_data.session_id}")
+    logger.info(f"[v2.0] Processing session: {input_data.session_id}")
 
-        # NEW: Handle Greeting, Bye, Deal, and Previous Offer
+    # ── Extract context from history ─────────────────────────────────────────
     last_user_offer = None
     last_bot_offer = None
-
-    # Find last offers from history
     for turn in reversed(input_data.history):
         role = turn.get("role", "").lower()
         if not last_bot_offer and role in ("bot", "assistant"):
-            if "counter_price" in turn and turn["counter_price"] is not None:
-                last_bot_offer = turn["counter_price"]
+            last_bot_offer = turn.get("counter_price") or turn.get("offer")
         if not last_user_offer and role == "user":
-            if "offer" in turn and turn["offer"] is not None:
-                last_user_offer = turn["offer"]
+            last_user_offer = turn.get("offer")
 
-    # =================================================================
-    # RULE 0: Over-Asking-Price Guard
-    # If the user offers MORE than the asking price, politely inform
-    # them and redirect. We do not want to take more than listed.
-    # =================================================================
-    if input_data.user_intent == "MAKE_OFFER" and input_data.user_offer > input_data.asking_price:
-        return StrategyOutput(
-            action="REJECT",
-            response_key="OFFER_ABOVE_ASKING",
-            counter_price=input_data.asking_price,
-            policy_type="rule-based",
-            policy_version=POLICY_VERSION,
-            decision_metadata={"asking_price": input_data.asking_price}
-        )
-
-    # Handle GREET
+    # ── Non-offer intents ─────────────────────────────────────────────────────
     if input_data.user_intent == "GREET":
-        return StrategyOutput(
-            action="REJECT",
-            response_key="GREET_HELLO",
-            counter_price=None,
-            policy_type="rule-based",
-            policy_version=POLICY_VERSION,
-            decision_metadata={}
-        )
+        return StrategyOutput(action="REJECT", response_key="GREET_HELLO",
+                              counter_price=None, policy_type="rule-based",
+                              policy_version=POLICY_VERSION, decision_metadata={})
 
-    # Handle BYE
     if input_data.user_intent == "BYE":
-        return StrategyOutput(
-            action="REJECT",
-            response_key="BYE_GOODBYE",
-            counter_price=None,
-            policy_type="rule-based",
-            policy_version=POLICY_VERSION,
-            decision_metadata={}
-        )
+        return StrategyOutput(action="REJECT", response_key="BYE_GOODBYE",
+                              counter_price=None, policy_type="rule-based",
+                              policy_version=POLICY_VERSION, decision_metadata={})
 
-    # Handle DEAL confirmation
     if input_data.user_intent == "DEAL":
-        return StrategyOutput(
-            action="ACCEPT",
-            response_key="DEAL_ACCEPTED",
-            counter_price=last_bot_offer or input_data.user_offer,
-            policy_type="rule-based",
-            policy_version=POLICY_VERSION,
-            decision_metadata={"rule": "deal_confirmed"}
-        )
+        return StrategyOutput(action="ACCEPT", response_key="DEAL_ACCEPTED",
+                              counter_price=last_bot_offer or input_data.user_offer,
+                              policy_type="rule-based", policy_version=POLICY_VERSION,
+                              decision_metadata={"rule": "deal_confirmed"})
 
-    # Handle previous offer query
     if input_data.user_intent == "ASK_PREVIOUS_OFFER":
-        return StrategyOutput(
-            action="REJECT",
-            response_key="PREVIOUS_OFFER",
-            counter_price=None,
-            policy_type="rule-based",
-            policy_version=POLICY_VERSION,
-            decision_metadata={
-                "user_offer": last_user_offer,
-                "bot_offer": last_bot_offer
-            }
-        )
+        return StrategyOutput(action="REJECT", response_key="PREVIOUS_OFFER",
+                              counter_price=None, policy_type="rule-based",
+                              policy_version=POLICY_VERSION,
+                              decision_metadata={"user_offer": last_user_offer,
+                                                 "bot_offer": last_bot_offer})
 
-    # =================================================================
-    # RULE 1 & 2 (Accept Rules) - UNCHANGED
-    # =================================================================
-    sentiment_accept_threshold = input_data.mam * SENTIMENT_ACCEPT_THRESHOLD_PERCENT
-    if (input_data.user_sentiment == 'negative' and 
-        input_data.user_offer >= sentiment_accept_threshold):
-        return StrategyOutput(action="ACCEPT", response_key="ACCEPT_SENTIMENT_CLOSE", counter_price=input_data.user_offer, policy_type="rule-based", policy_version=POLICY_VERSION, decision_metadata={"rule": "sentiment_accept"})
+    # ── Guard: Over-asking price ──────────────────────────────────────────────
+    if input_data.user_intent == "MAKE_OFFER" and input_data.user_offer > input_data.asking_price:
+        return StrategyOutput(action="REJECT", response_key="OFFER_ABOVE_ASKING",
+                              counter_price=input_data.asking_price,
+                              policy_type="rule-based", policy_version=POLICY_VERSION,
+                              decision_metadata={"asking_price": input_data.asking_price})
 
+    # ── RULE 1: Accept at or above MAM ───────────────────────────────────────
     if input_data.user_offer >= input_data.mam:
-        return StrategyOutput(action="ACCEPT", response_key="ACCEPT_FINAL", counter_price=input_data.user_offer, policy_type="rule-based", policy_version=POLICY_VERSION, decision_metadata={"rule": "standard_accept"})
-    
-    # =================================================================
-    # RULE 3: Lowball REJECT Logic - UNCHANGED
-    # =================================================================
-    lowball_threshold = input_data.mam * LOWBALL_THRESHOLD_PERCENT
-    if input_data.user_offer < lowball_threshold:
-        return StrategyOutput(action="REJECT", response_key="REJECT_LOWBALL", counter_price=None, policy_type="rule-based", policy_version=POLICY_VERSION, decision_metadata={"rule": "lowball_reject"})
+        return StrategyOutput(action="ACCEPT", response_key="ACCEPT_FINAL",
+                              counter_price=input_data.user_offer,
+                              policy_type="rule-based", policy_version=POLICY_VERSION,
+                              decision_metadata={"rule": "standard_accept"})
 
-    # =================================================================
-    # RULE 4: Counter-Offer Logic (Offer-Count Aware)
-    # =================================================================
-    
-    # 1. Determine our current standing
+    # ── RULE 2: Sentiment-adjusted accept (frustrated buyer near MAM) ─────────
+    # Only trigger if negative AND user has been negotiating for a while
+    past_offers = count_user_offers(input_data.history)
+    if (input_data.user_sentiment == "negative"
+            and past_offers >= 2
+            and input_data.user_offer >= input_data.mam * SENTIMENT_ACCEPT_THRESHOLD):
+        return StrategyOutput(action="ACCEPT", response_key="ACCEPT_SENTIMENT_CLOSE",
+                              counter_price=input_data.user_offer,
+                              policy_type="rule-based", policy_version=POLICY_VERSION,
+                              decision_metadata={"rule": "sentiment_accept"})
+
+    # ── RULE 3: Lowball rejection ─────────────────────────────────────────────
+    if input_data.user_offer < input_data.mam * 0.70:
+        return StrategyOutput(action="REJECT", response_key="REJECT_LOWBALL",
+                              counter_price=None, policy_type="rule-based",
+                              policy_version=POLICY_VERSION,
+                              decision_metadata={"rule": "lowball_reject"})
+
+    # ── RULE 4: Counter-offer (pattern + psychology aware) ───────────────────
     current_bot_price = get_last_bot_offer(input_data)
-    
-    # 2. Count Offers
-    # We count history offers + 1 (the current offer being processed)
-    past_user_offers = count_user_offers(input_data.history)
-    total_user_offers = past_user_offers + 1
-    
-    logger.info(f"User Offer Count: {total_user_offers} (Threshold: {USER_OFFER_THRESHOLD})")
+    total_offers = past_offers + 1  # includes current one
+    offer_history = get_user_offer_history(input_data.history)
+    pattern = detect_pattern(input_data.user_offer, offer_history, input_data.asking_price)
 
-    # 3. Decide Strategy based on Count
-    if total_user_offers > USER_OFFER_THRESHOLD:
-        # --- FINAL ROUND STRATEGY ---
-        concession_factor = FINAL_CONCESSION_FACTOR
+    logger.info(f"Offer #{total_offers} | Pattern: {pattern} | Sentiment: {input_data.user_sentiment}")
+
+    # ── Determine concession factor ───────────────────────────────────────────
+    is_final_round = total_offers >= FINAL_OFFER_THRESHOLD
+
+    if is_final_round:
+        concession_factor = FINAL_OFFER_FACTOR
         response_key = "COUNTER_FINAL_OFFER"
-        logger.info("Offer Threshold reached. Triggering Final Offer.")
+
     else:
-        # --- STANDARD STRATEGY ---
-        concession_factor = STANDARD_CONCESSION_FACTOR
-        response_key = "STANDARD_COUNTER"
+        concession_factor = get_concession_factor(total_offers)
 
-    # 4. Calculate Concession
+        # Pattern modifiers
+        if pattern == "stalling":
+            # User barely moved → bot barely moves too (hold firm)
+            concession_factor *= 0.40
+            response_key = "COUNTER_HOLD_FIRM"
+
+        elif pattern == "rapid_close":
+            # User is serious, closing fast → slight extra generosity to seal deal
+            concession_factor *= 1.30
+            response_key = "COUNTER_ENCOURAGE_CLOSE"
+
+        else:
+            response_key = "STANDARD_COUNTER"
+
+        # Sentiment modifier: enthusiastic users get less concession
+        if input_data.user_sentiment == "positive":
+            concession_factor *= 0.80   # They're excited — no need to over-discount
+
+    # ── Calculate final counter price ─────────────────────────────────────────
     gap = current_bot_price - input_data.user_offer
-    drop_amount = gap * concession_factor
-    midpoint = current_bot_price - drop_amount
+    drop = gap * concession_factor
+    midpoint = current_bot_price - drop
 
-#gpt suggested method for bot not going above its previous offer
-    final_counter = min(current_bot_price, max(input_data.mam, midpoint))
-    final_counter = math.ceil(final_counter)
-    
-
+    # Never go below MAM, never exceed previous bot price
+    final_counter = math.ceil(min(current_bot_price, max(input_data.mam, midpoint)))
 
     return StrategyOutput(
         action="COUNTER",
@@ -192,10 +214,13 @@ def make_decision(input_data: StrategyInput) -> StrategyOutput:
         policy_type="rule-based",
         policy_version=POLICY_VERSION,
         decision_metadata={
-            "rule": "offer_count_aware_counter",
+            "rule": "pattern_aware_diminishing_counter",
             "mam": input_data.mam,
-            "offer_number": total_user_offers,
-            "is_final_round": total_user_offers >= USER_OFFER_THRESHOLD,
+            "offer_number": total_offers,
+            "pattern": pattern,
+            "sentiment": input_data.user_sentiment,
+            "is_final_round": is_final_round,
+            "concession_factor_used": round(concession_factor, 3),
             "final_counter": final_counter
         }
     )

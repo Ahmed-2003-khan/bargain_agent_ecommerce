@@ -93,6 +93,21 @@ TEMPLATES = {
         "Template: I can't accept your last offer, but I *can* meet you at {price}. Does that work?",
     ],
 
+    # 4a. Hold Firm Counter-Offer (User is stalling)
+    # Tone: Completely normal counter-offer (the price math handles the 'firmness', not the text)
+    "COUNTER_HOLD_FIRM": [
+        "Template: How about we agree on {price}?",
+        "Template: I can offer this to you for {price}.",
+        "Template: Let's make it {price}. How does that sound?",
+    ],
+
+    # 4b. Encourage Close Counter-Offer (User made a big jump)
+    "COUNTER_ENCOURAGE_CLOSE": [
+        "Template: I see you're serious about making a deal. Let's make this happen—how about {price}?",
+        "Template: You've made a great move. If we can just meet at {price}, we have a deal right now.",
+        "Template: We are very close to an agreement! Let's meet at {price} and wrap this up.",
+    ],
+
     # 5. Final Offer (New for v1.3 Brain)
     # Tone: Firm, conclusive, "take it or leave it".
     "COUNTER_FINAL_OFFER": [

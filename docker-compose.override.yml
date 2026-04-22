@@ -1,0 +1,17 @@
+# docker-compose.override.yml
+# ──────────────────────────────────────────────────────────────
+# LOCAL DEVELOPMENT ONLY
+# This file is automatically merged by docker-compose when you run
+# `docker-compose up` locally. It is NOT used in production.
+#
+# What it does:
+#   - Swaps Gunicorn (production) → uvicorn --reload (dev)
+#   - Mounts your local source code into the container
+#     so code changes reflect instantly without rebuilding.
+# ──────────────────────────────────────────────────────────────
+
+services:
+  orchestrator:
+    command: uvicorn orchestrator.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./orchestrator:/app/orchestrator  # live code mount

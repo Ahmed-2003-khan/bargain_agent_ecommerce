@@ -120,30 +120,6 @@ def make_decision(input_data: StrategyInput) -> StrategyOutput:
         if not last_user_offer and role == "user":
             last_user_offer = turn.get("user_offer") or turn.get("offer")
 
-    # ── Non-offer intents ─────────────────────────────────────────────────────
-    if input_data.user_intent == "GREET":
-        return StrategyOutput(action="REJECT", response_key="GREET_HELLO",
-                              counter_price=None, policy_type="rule-based",
-                              policy_version=POLICY_VERSION, decision_metadata={})
-
-    if input_data.user_intent == "BYE":
-        return StrategyOutput(action="REJECT", response_key="BYE_GOODBYE",
-                              counter_price=None, policy_type="rule-based",
-                              policy_version=POLICY_VERSION, decision_metadata={})
-
-    if input_data.user_intent == "DEAL":
-        return StrategyOutput(action="ACCEPT", response_key="DEAL_ACCEPTED",
-                              counter_price=last_bot_offer or input_data.user_offer,
-                              policy_type="rule-based", policy_version=POLICY_VERSION,
-                              decision_metadata={"rule": "deal_confirmed"})
-
-    if input_data.user_intent == "ASK_PREVIOUS_OFFER":
-        return StrategyOutput(action="REJECT", response_key="PREVIOUS_OFFER",
-                              counter_price=None, policy_type="rule-based",
-                              policy_version=POLICY_VERSION,
-                              decision_metadata={"user_offer": last_user_offer,
-                                                 "bot_offer": last_bot_offer})
-
     # ── Guard: Over-asking price ──────────────────────────────────────────────
     if input_data.user_intent == "MAKE_OFFER" and input_data.user_offer > input_data.asking_price:
         return StrategyOutput(action="REJECT", response_key="OFFER_ABOVE_ASKING",

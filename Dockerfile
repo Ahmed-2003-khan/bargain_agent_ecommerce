@@ -18,5 +18,5 @@ RUN poetry config virtualenvs.create false \
 # Expose port
 EXPOSE 8000
 
-# Run FastAPI with uvicorn
-CMD ["uvicorn", "orchestrator.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Run FastAPI with gunicorn (production — no --reload, multi-worker)
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "orchestrator.main:app", "--bind", "0.0.0.0:8000"]

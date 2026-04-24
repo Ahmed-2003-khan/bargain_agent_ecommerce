@@ -23,7 +23,8 @@ async def nlu_node(state: AgentState):
         nlu = {
             "intent": Intent.UNKNOWN,
             "sentiment": "neutral",
-            "entities": {}
+            "entities": {},
+            "is_fallback": True,
         }
 
     state["intent"] = nlu.get("intent", Intent.UNKNOWN)
@@ -31,6 +32,7 @@ async def nlu_node(state: AgentState):
     state["user_offer"] = nlu.get("entities", {}).get("PRICE", 0)
     state["language"] = nlu.get("language", "english")
     state["error_message"] = nlu.get("error_message")
+    state["is_fallback"] = nlu.get("is_fallback", False)
 
     if state["intent"] == Intent.INVALID:
         state["final_response"] = state["error_message"] or "I cannot process that input, please try again."
@@ -65,13 +67,15 @@ async def brain_node(state: AgentState):
             # 🔥 REQUIRED BY MS5 SCHEMA
             "policy_type": "rule-based",
             "policy_version": "fallback",
-            "decision_metadata": {"reason": "brain_failed"}
+            "decision_metadata": {"reason": "brain_failed"},
+            "is_fallback": True,
         }
 
     # ⭐ Structured state mapping
     state["brain_action"] = brain.get("action")
     state["counter_price"] = brain.get("counter_price")
     state["response_key"] = brain.get("response_key")
+    state["is_fallback"] = state.get("is_fallback", False) or brain.get("is_fallback", False)
 
     
     # ⭐ Guarantee MS5 contract fields
@@ -125,10 +129,12 @@ async def mouth_node(state: AgentState):
             response_text = str(ms5)
 
         state["final_response"] = response_text
+        state["is_fallback"] = state.get("is_fallback", False) or ms5.get("is_fallback", False)
 
     except Exception as e:
         logger.exception("Mouth Error: %s", e)
         state["final_response"] = "System is thinking. Please try again."
+        state["is_fallback"] = True
 
     return state
 

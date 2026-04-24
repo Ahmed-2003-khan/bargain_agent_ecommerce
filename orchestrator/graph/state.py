@@ -22,6 +22,7 @@ class AgentState(TypedDict, total=False):
 
     # Final
     final_response: str
+    is_fallback: bool
     
     # Internal
     _brain_raw: Dict[str, Any]

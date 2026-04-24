@@ -17,6 +17,7 @@ Rate Limiting:
 
 import os
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -108,6 +109,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------- Request ID Middleware ----------------------
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Generate a unique X-Request-ID for every request and attach to logs + response."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    # Store on request state so nodes/clients can access it
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 # ---------------------- Schemas ----------------------
@@ -243,6 +256,7 @@ async def chat_endpoint(
                     "asking_price": asking_price,
                     "user_input": payload.message,
                     "history": history,
+                    "request_id": getattr(request.state, "request_id", ""),
                 }
 
                 result = await graph_app.ainvoke(state)

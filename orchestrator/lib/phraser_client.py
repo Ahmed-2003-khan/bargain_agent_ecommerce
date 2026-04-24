@@ -35,7 +35,7 @@ async def _call_phraser_with_retry(payload: dict, request_id: str = "") -> dict:
     """Raw HTTP call to LLM Phraser with retry logic."""
     client = get_http_client()
     headers = {"X-Request-ID": request_id} if request_id else {}
-    resp = await client.post(f"{LLM_PHRASER_URL}/phrase", json=payload, headers=headers)
+    resp = await client.post(f"{LLM_PHRASER_URL}/api/v1/phrase", json=payload, headers=headers)
     resp.raise_for_status()
     return resp.json()
 

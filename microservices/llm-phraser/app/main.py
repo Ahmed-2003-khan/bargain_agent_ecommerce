@@ -80,7 +80,7 @@ async def health_check():
     return {"status": "ok", "service": "llm-phraser"}
 
 # --- LLM Phrasing Endpoint ---
-@app.post("/phrase", response_model=PhraserOutput)
+@app.post("/api/v1/phrase", response_model=PhraserOutput)
 async def generate_phrase(
     input_data: PhraserInput,
     client: AsyncGroq = Depends(get_groq_client)

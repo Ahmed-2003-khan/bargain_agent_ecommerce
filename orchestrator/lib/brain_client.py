@@ -33,6 +33,7 @@ def _build_fallback(asking_price: float) -> dict:
         "policy_type": "rule-based",
         "policy_version": "fallback",
         "decision_metadata": {"reason": "brain_unavailable"},
+        "is_fallback": True,
     }
 
 
@@ -49,7 +50,9 @@ async def _call_brain_with_retry(payload: dict, request_id: str = "") -> dict:
     headers = {"X-Request-ID": request_id} if request_id else {}
     resp = await client.post(f"{STRATEGY_ENGINE_URL}/api/v1/decide", json=payload, headers=headers)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    data["is_fallback"] = False
+    return data
 
 
 async def call_brain(

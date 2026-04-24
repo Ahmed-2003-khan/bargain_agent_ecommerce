@@ -21,7 +21,7 @@ LLM_PHRASER_URL = os.getenv("LLM_PHRASER_URL", "http://llm-phraser:8000")
 _breaker = CircuitBreaker("llm-phraser", failure_threshold=5, recovery_timeout=30)
 
 # Fallback when LLM Phraser is down
-_FALLBACK = {"response_text": "Let me think about that for a moment."}
+_FALLBACK = {"response_text": "Let me think about that for a moment.", "is_fallback": True}
 
 
 @retry(
@@ -37,7 +37,9 @@ async def _call_phraser_with_retry(payload: dict, request_id: str = "") -> dict:
     headers = {"X-Request-ID": request_id} if request_id else {}
     resp = await client.post(f"{LLM_PHRASER_URL}/api/v1/phrase", json=payload, headers=headers)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    data["is_fallback"] = False
+    return data
 
 
 async def call_phraser(brain_output: dict, language: str = "english", request_id: str = "") -> dict:

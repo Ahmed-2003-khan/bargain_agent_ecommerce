@@ -43,16 +43,18 @@ def _build_fallback(asking_price: float) -> dict:
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-async def _call_brain_with_retry(payload: dict) -> dict:
+async def _call_brain_with_retry(payload: dict, request_id: str = "") -> dict:
     """Raw HTTP call to Strategy Engine with retry logic."""
     client = get_http_client()
-    resp = await client.post(f"{STRATEGY_ENGINE_URL}/decide", json=payload)
+    headers = {"X-Request-ID": request_id} if request_id else {}
+    resp = await client.post(f"{STRATEGY_ENGINE_URL}/decide", json=payload, headers=headers)
     resp.raise_for_status()
     return resp.json()
 
 
 async def call_brain(
-    mam, asking_price, user_offer, user_intent, user_sentiment, session_id, history
+    mam, asking_price, user_offer, user_intent, user_sentiment, session_id, history,
+    request_id: str = ""
 ) -> dict:
     """
     Call the Strategy Engine with:
@@ -76,12 +78,12 @@ async def call_brain(
     }
 
     logger.info(
-        "[MS4] Sending to Brain: session=%s, intent=%s, offer=%s",
-        session_id, user_intent, user_offer,
+        "[rid=%s][MS4] Sending to Brain: session=%s, intent=%s, offer=%s",
+        request_id, session_id, user_intent, user_offer,
     )
 
     try:
-        return await _breaker.call(_call_brain_with_retry, payload)
+        return await _breaker.call(_call_brain_with_retry, payload, request_id)
 
     except CircuitOpenError:
         logger.warning("Brain circuit OPEN — using fallback")

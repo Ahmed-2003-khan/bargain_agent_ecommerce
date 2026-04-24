@@ -31,15 +31,16 @@ _FALLBACK = {"response_text": "Let me think about that for a moment."}
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-async def _call_phraser_with_retry(payload: dict) -> dict:
+async def _call_phraser_with_retry(payload: dict, request_id: str = "") -> dict:
     """Raw HTTP call to LLM Phraser with retry logic."""
     client = get_http_client()
-    resp = await client.post(f"{LLM_PHRASER_URL}/phrase", json=payload)
+    headers = {"X-Request-ID": request_id} if request_id else {}
+    resp = await client.post(f"{LLM_PHRASER_URL}/phrase", json=payload, headers=headers)
     resp.raise_for_status()
     return resp.json()
 
 
-async def call_phraser(brain_output: dict, language: str = "english") -> dict:
+async def call_phraser(brain_output: dict, language: str = "english", request_id: str = "") -> dict:
     """
     Call the LLM Phraser with:
     - Connection pooling (shared httpx client)
@@ -57,10 +58,10 @@ async def call_phraser(brain_output: dict, language: str = "english") -> dict:
         "language": language,
     }
 
-    logger.info(f"[Phraser] Sending payload: {phraser_payload}")
+    logger.info("[rid=%s][Phraser] Sending: action=%s key=%s", request_id, phraser_payload.get("action"), phraser_payload.get("response_key"))
 
     try:
-        data = await _breaker.call(_call_phraser_with_retry, phraser_payload)
+        data = await _breaker.call(_call_phraser_with_retry, phraser_payload, request_id)
         logger.info(f"[Phraser] RAW RESPONSE ← {data}")
         return data
 

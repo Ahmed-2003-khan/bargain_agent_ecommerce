@@ -35,15 +35,16 @@ _FALLBACK = {
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-async def _call_nlu_with_retry(payload: dict) -> dict:
+async def _call_nlu_with_retry(payload: dict, request_id: str = "") -> dict:
     """Raw HTTP call to NLU with retry logic. Raises on failure."""
     client = get_http_client()
-    resp = await client.post(f"{NLU_URL}/parse", json=payload)
+    headers = {"X-Request-ID": request_id} if request_id else {}
+    resp = await client.post(f"{NLU_URL}/parse", json=payload, headers=headers)
     resp.raise_for_status()
     return resp.json()
 
 
-async def call_nlu(text: str, session_id: str) -> dict:
+async def call_nlu(text: str, session_id: str, request_id: str = "") -> dict:
     """
     Call the NLU service with:
     - Connection pooling (shared httpx client)
@@ -54,12 +55,12 @@ async def call_nlu(text: str, session_id: str) -> dict:
     payload = {"text": text, "session_id": session_id}
 
     try:
-        return await _breaker.call(_call_nlu_with_retry, payload)
+        return await _breaker.call(_call_nlu_with_retry, payload, request_id)
 
     except CircuitOpenError:
-        logger.warning("NLU circuit OPEN — using fallback")
+        logger.warning("[rid=%s] NLU circuit OPEN — using fallback", request_id)
         return _FALLBACK
 
     except Exception as e:
-        logger.exception(f"NLU failed after retries: {e}")
+        logger.exception("[rid=%s] NLU failed after retries: %s", request_id, e)
         return _FALLBACK

@@ -119,7 +119,7 @@ def _deterministic_fallback(text: str) -> dict:
 # =====================================================
 # PARSE ENDPOINT  — contract unchanged
 # =====================================================
-@app.post("/parse", response_model=NLUOutput)
+@app.post("/api/v1/parse", response_model=NLUOutput)
 async def parse(input: NLUInput):
     """
     Parse user text into structured NLU output.

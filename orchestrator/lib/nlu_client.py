@@ -39,7 +39,7 @@ async def _call_nlu_with_retry(payload: dict, request_id: str = "") -> dict:
     """Raw HTTP call to NLU with retry logic. Raises on failure."""
     client = get_http_client()
     headers = {"X-Request-ID": request_id} if request_id else {}
-    resp = await client.post(f"{NLU_URL}/parse", json=payload, headers=headers)
+    resp = await client.post(f"{NLU_URL}/api/v1/parse", json=payload, headers=headers)
     resp.raise_for_status()
     return resp.json()
 

@@ -25,6 +25,8 @@ services:
   nlu-service:
     env_file:
       - .env.dev
+    volumes:
+      - ./microservices/nlu-service:/app
 
   llm-phraser:
     env_file:

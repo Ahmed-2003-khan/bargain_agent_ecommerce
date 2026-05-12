@@ -40,6 +40,9 @@ class NLUSignature(dspy.Signature):
                          Hypothetical framing with a clear price also counts as MAKE_OFFER:
                          "What if I said 800?", "What if I offer 1000?", "Suppose I give you 500?" —
                          extract the stated price and treat as MAKE_OFFER.
+                         Questions that contain a clear proposed price also count as MAKE_OFFER:
+                         "Is 500 a reasonable price?", "Would 800 work?", "Can you do 1000?" —
+                         treat as MAKE_OFFER, NOT ASK_QUESTION.
     - DEAL             : user accepts/agrees to a price (deal, agreed, theek hai deal)
     - ASK_PREVIOUS_OFFER: user asks about a prior offer or counter-offer
     - ASK_QUESTION     : user asks anything else about the product/service

@@ -108,6 +108,14 @@ RAW_EXAMPLES = [
         "error_message": "None",
     },
     {
+        "user_message": "Is 500 a reasonable price for this?",
+        "intent": "MAKE_OFFER",
+        "price": "500.0",
+        "sentiment": "neutral",
+        "language": "english",
+        "error_message": "None",
+    },
+    {
         "user_message": "Khuda hafiz, lekin mera offer 1200 hai",
         "intent": "MAKE_OFFER",
         "price": "1200.0",

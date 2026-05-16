@@ -164,6 +164,13 @@ class ChatOutput(BaseModel):
     is_locked: bool = False
 
 
+# ⚠️  TEST-ONLY SCHEMA — REMOVE BEFORE PRODUCTION ⚠️
+# class SeedSessionInput(BaseModel):
+#     user_id: str
+#     mam: float
+#     asking_price: float
+
+
 # =====================================================
 # 🔐 AUTH DEPENDENCY — Session Validation
 # =====================================================
@@ -246,6 +253,35 @@ async def health_check():
     return {"status": "ok" if redis_ok else "degraded"}
 
 
+# =====================================================
+# ⚠️  TEST-ONLY ENDPOINT — REMOVE BEFORE PRODUCTION ⚠️
+# Seeds a fresh negotiation session directly into Redis.
+# Used by run_adversarial_tests.py to bypass the monolith
+# session-creation flow.
+# =====================================================
+# @app.post("/ina/v1/seed")
+# async def seed_session(payload: SeedSessionInput):
+#     session = {
+#         "mam":           payload.mam,
+#         "asking_price":  payload.asking_price,
+#         "messages":      [],
+#         "offer_count":   0,
+#         "status":        "negotiating",
+#         "last_bot_offer": None,
+#     }
+#     ok = await state_manager.set_session(payload.user_id, session)
+#     if not ok:
+#         raise HTTPException(
+#             status_code=500,
+#             detail={"error": True, "code": "SEED_FAILED",
+#                     "message": "Failed to write session to Redis."},
+#         )
+#     logger.info("[TEST-SEED] user_id=%s mam=%s asking_price=%s",
+#                 payload.user_id, payload.mam, payload.asking_price)
+#     return {"seeded": True, "user_id": payload.user_id,
+#             "mam": payload.mam, "asking_price": payload.asking_price}
+
+
 # ---------------------- DB Sync Task ----------------------
 async def send_negotiation_outcome_to_db(
     session_id: str,
@@ -304,7 +340,7 @@ async def send_negotiation_outcome_to_db(
 # 🔥 MAIN CHAT ENDPOINT (Session-Authenticated + Rate-Limited)
 # =====================================================
 @app.post("/ina/v1/chat", response_model=ChatOutput)
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 async def chat_endpoint(
     request: Request,
     payload: ChatInput,
@@ -320,6 +356,9 @@ async def chat_endpoint(
 
     try:
         redis_key = payload.user_id
+        
+        # ✂️ Silent truncate to protect LLM context windows
+        payload.message = payload.message[:1000]
 
         # ------------------------------------------------
         # ------------------------------------------------
@@ -383,6 +422,7 @@ async def chat_endpoint(
                     "session_id": redis_key,
                     "mam": mam,
                     "asking_price": asking_price,
+                    "last_bot_offer": last_bot_offer,
                     "user_input": payload.message,
                     "history": history,
                     "request_id": getattr(request.state, "request_id", ""),
@@ -465,9 +505,10 @@ async def chat_endpoint(
             updated_session["last_bot_offer"] = new_last_bot_offer
             await state_manager.set_session(redis_key, updated_session)
 
-            # Fire off DB save if deal was naturally closed OR session just got locked
-            if brain_action in ("ACCEPT", "DEAL") or new_status == "locked":
-                db_final_price = new_last_bot_offer or user_offer or 0.0
+            # Fire off DB save if deal was naturally closed OR session just got locked.
+            # Only fires when a real price exists — no phantom Rs 0 records.
+            db_final_price = new_last_bot_offer or user_offer
+            if (brain_action in ("ACCEPT", "DEAL") or new_status == "locked") and db_final_price:
                 language = result.get("language", "english") if result else "english"
                 db_outcome = (
                     "ACCEPTED" if brain_action in ("ACCEPT", "DEAL") else "FORCED_DEAL"
@@ -488,7 +529,7 @@ async def chat_endpoint(
             if new_status == "locked"
             else ("deal_accepted" if deal_accepted else "in_progress")
         )
-        out_final_price = float(new_last_bot_offer or 0.0) if deal_accepted else None
+        out_final_price = float(new_last_bot_offer) if (deal_accepted and new_last_bot_offer) else None
         return ChatOutput(
             response=ai_response,
             is_fallback=is_fallback,

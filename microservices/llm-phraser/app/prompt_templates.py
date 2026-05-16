@@ -43,9 +43,19 @@ TEMPLATES = {
         "Template: Awesome, the deal is confirmed.",
         "Template: Fantastic! We have a deal.",
     ],
+    "DEAL_NO_CONTEXT": [
+        "Template: We haven't discussed a price yet. What's your offer?",
+        "Template: There's no price on the table to agree to. Please make an offer first.",
+        "Template: Let's settle on a number first. What price would you like to offer?",
+    ],
     "PREVIOUS_OFFER": [
         "Template: Earlier you offered {user_offer}, and I countered with {bot_offer}.",
         "Template: You last offered {user_offer}, and my response was {bot_offer}.",
+    ],
+    "CURRENT_PRICE": [
+        "Template: The current price is {current_price}.",
+        "Template: Right now the price stands at {current_price}.",
+        "Template: The price on the table is {current_price}. Want to make an offer?",
     ],
     "OUT_OF_SCOPE_QUESTION": [
         "Template: I am an automated bargaining agent here to negotiate the price. For product details or general questions, please check the main product description.",
@@ -133,6 +143,9 @@ def get_formatted_prompt(input_data: PhraserInput) -> Tuple[str, str]:
             formatted_prompt = selected_template.format(
                 user_offer=user_offer, bot_offer=bot_offer
             )
+        elif key == "CURRENT_PRICE":
+            current_price = input_data.decision_metadata.get("current_price", "N/A")
+            formatted_prompt = selected_template.format(current_price=current_price)
         else:
             price_str = f"Rs {price:,.0f}" if price is not None else ""
             formatted_prompt = selected_template.format(price=price_str)

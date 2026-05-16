@@ -169,19 +169,47 @@ async def fast_track_node(state: AgentState):
     """
     intent = state.get("intent", Intent.UNKNOWN)
 
+    # Guard: DEAL is only valid when a price has been established.
+    # If the user says "deal" before any offer or counter has been made,
+    # reroute to a prompt asking them to make an offer first.
+    if intent == Intent.DEAL:
+        last_bot_offer = state.get("last_bot_offer")
+        history = state.get("history", [])
+        has_user_offer = any(
+            turn.get("user_offer")
+            for turn in history
+            if turn.get("from") == "user"
+        )
+        if not last_bot_offer and not has_user_offer:
+            intent = "DEAL_NO_CONTEXT"
+
     # Map each fast-track intent to its Phraser response_key
     FAST_TRACK_MAP = {
         Intent.GREET: ("GREETING", "GREET_HELLO"),
         Intent.BYE: ("FAREWELL", "BYE_GOODBYE"),
         Intent.DEAL: ("ACCEPT", "DEAL_ACCEPTED"),
+        "DEAL_NO_CONTEXT": ("INFO", "DEAL_NO_CONTEXT"),
         Intent.ASK_PREVIOUS_OFFER: ("INFO", "PREVIOUS_OFFER"),
+        Intent.ASK_CURRENT_PRICE: ("INFO", "CURRENT_PRICE"),
         Intent.ASK_QUESTION: ("INFO", "OUT_OF_SCOPE_QUESTION"),
     }
 
     action, response_key = FAST_TRACK_MAP.get(intent, ("INFO", "DEFAULT"))
 
-    # For PREVIOUS_OFFER: extract last known user and bot prices from history
+    # For CURRENT_PRICE: surface last_bot_offer if mid-negotiation,
+    # else fall back to the original asking_price.
     decision_metadata = {}
+    if intent == Intent.ASK_CURRENT_PRICE:
+        last_bot_offer = state.get("last_bot_offer")
+        asking_price = state.get("asking_price")
+        current_price = last_bot_offer if last_bot_offer else asking_price
+        decision_metadata = {
+            "current_price": (
+                f"Rs {current_price:,.0f}" if current_price else "N/A"
+            ),
+        }
+
+    # For PREVIOUS_OFFER: extract last known user and bot prices from history
     if intent == Intent.ASK_PREVIOUS_OFFER:
         history = state.get("history", [])
         last_bot_offer = None

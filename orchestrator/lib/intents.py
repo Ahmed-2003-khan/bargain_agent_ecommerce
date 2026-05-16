@@ -30,6 +30,9 @@ class Intent:
     # User is asking about a previous offer ("what was your last price?")
     ASK_PREVIOUS_OFFER: Final = "ASK_PREVIOUS_OFFER"
 
+    # User is asking the current price ("what is the price?", "kitne ka hai?")
+    ASK_CURRENT_PRICE: Final = "ASK_CURRENT_PRICE"
+
     # Anything the NLU couldn't classify
     UNKNOWN: Final = "UNKNOWN"
 
@@ -37,7 +40,9 @@ class Intent:
     INVALID: Final = "INVALID"
 
     # Intents that require the negotiation Strategy Engine
-    NEGOTIATION_INTENTS: Final = frozenset({MAKE_OFFER, DEAL, ASK_PREVIOUS_OFFER})
+    NEGOTIATION_INTENTS: Final = frozenset(
+        {MAKE_OFFER, DEAL, ASK_PREVIOUS_OFFER, ASK_CURRENT_PRICE}
+    )
 
     # Intents that are purely conversational (no Strategy Engine needed)
     CONVERSATIONAL_INTENTS: Final = frozenset({GREET, BYE, ASK_QUESTION, UNKNOWN})

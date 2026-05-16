@@ -5,6 +5,7 @@ class AgentState(TypedDict, total=False):
     session_id: str
     mam: float
     asking_price: float
+    last_bot_offer: float
     user_input: str
     history: List[Dict[str, Any]]
 

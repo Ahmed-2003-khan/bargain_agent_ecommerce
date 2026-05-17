@@ -4,7 +4,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from .schemas import PhraserInput, PhraserOutput
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -15,6 +15,7 @@ load_dotenv()
 
 from .llm_client import generate_llm_response
 
+from openai import AsyncOpenAI
 from groq import AsyncGroq
 
 # Configure basic logging
@@ -25,17 +26,24 @@ logger = logging.getLogger(__name__)
 INTERNAL_KEY = os.getenv("INTERNAL_SERVICE_KEY", "")
 
 # --- API Key and Client Management ---
-API_KEY = os.environ.get("GROQ_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-if not API_KEY:
-    logger.error("FATAL: GROQ_API_KEY environment variable not set.")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not set — OpenAI primary will be unavailable.")
+if not GROQ_API_KEY:
+    logger.warning("GROQ_API_KEY not set — Groq fallback will be unavailable.")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load the client when the app starts
-    app.state.groq_client = AsyncGroq(api_key=API_KEY)
-    logger.info("Groq client initialized.")
+    app.state.openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+    app.state.groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+    logger.info(
+        "LLM clients initialized — OpenAI: %s, Groq: %s",
+        "ready" if app.state.openai_client else "unavailable",
+        "ready" if app.state.groq_client else "unavailable",
+    )
     yield
     logger.info("Shutting down...")
 
@@ -73,13 +81,6 @@ async def verify_internal_key(request: Request, call_next):
     return await call_next(request)
 
 
-# --- Dependency to get the client ---
-async def get_groq_client():
-    if not app.state.groq_client:
-        raise HTTPException(status_code=503, detail="Groq client is not available.")
-    return app.state.groq_client
-
-
 # --- Health Check Endpoint ---
 @app.get("/health", status_code=200)
 async def health_check():
@@ -88,16 +89,19 @@ async def health_check():
 
 # --- LLM Phrasing Endpoint ---
 @app.post("/api/v1/phrase", response_model=PhraserOutput)
-async def generate_phrase(
-    input_data: PhraserInput, client: AsyncGroq = Depends(get_groq_client)
-):
+async def generate_phrase(input_data: PhraserInput):
     """
     Receives a command from the Strategy Engine (MS 4) and
     generates a persuasive, natural language response.
-    """
 
+    Uses OpenAI GPT-4o as primary, falls back to Groq if unavailable.
+    """
     try:
-        response_text = await generate_llm_response(input_data, client)
+        response_text = await generate_llm_response(
+            input_data,
+            openai_client=app.state.openai_client,
+            groq_client=app.state.groq_client,
+        )
         return PhraserOutput(response_text=response_text)
 
     except Exception as e:

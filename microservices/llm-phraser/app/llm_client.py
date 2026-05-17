@@ -1,54 +1,87 @@
 # Purpose: Isolates all external LLM API logic.
+# Primary: OpenAI GPT-4o | Fallback: Groq llama-3.3-70b-versatile
 
+import os
+import logging
+from typing import Optional
+
+from openai import AsyncOpenAI
 from groq import AsyncGroq
 from .schemas import PhraserInput
 from .prompt_templates import get_formatted_prompt
-import logging
 
 logger = logging.getLogger(__name__)
 
+OPENAI_MODEL = os.getenv("OPENAI_PHRASER_MODEL", "gpt-4o")
+GROQ_MODEL = os.getenv("GROQ_PHRASER_MODEL", "llama-3.3-70b-versatile")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
-# This is the "Adapter" for our LLM.
-# All the logic for calling the Groq API lives here.
-async def generate_llm_response(input_data: PhraserInput, client: AsyncGroq) -> str:
-    """
-    Generates a persuasive response from the Groq API.
-    """
 
-    # 1. Get the prompt
+async def _call_openai(
+    system_prompt: str, user_prompt: str, client: AsyncOpenAI
+) -> str:
+    """Call OpenAI GPT-4o and return the response text."""
+    response = await client.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=LLM_TEMPERATURE,
+        max_tokens=512,
+    )
+    return response.choices[0].message.content or ""
+
+
+async def _call_groq(
+    system_prompt: str, user_prompt: str, client: AsyncGroq
+) -> str:
+    """Call Groq as fallback and return the response text."""
+    response = await client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=LLM_TEMPERATURE,
+        max_tokens=512,
+    )
+    return response.choices[0].message.content or ""
+
+
+async def generate_llm_response(
+    input_data: PhraserInput,
+    openai_client: Optional[AsyncOpenAI] = None,
+    groq_client: Optional[AsyncGroq] = None,
+) -> str:
+    """
+    Generate a persuasive response using LLM.
+    Strategy: OpenAI GPT-4o primary → Groq fallback → static fallback.
+    """
     system_prompt, user_prompt = get_formatted_prompt(input_data)
 
-    logger.info(f"Generating phrase for key: {input_data.response_key}")
+    logger.info("Generating phrase for key: %s", input_data.response_key)
 
-    # 2. Call Groq API
-    try:
-        chat_completion = await client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
-            model="llama-3.3-70b-versatile",  # Fast and capable model
-            temperature=1,
-            max_tokens=512,
-        )
+    # --- Primary: OpenAI GPT-4o ---
+    if openai_client:
+        try:
+            response_text = await _call_openai(system_prompt, user_prompt, openai_client)
+            if response_text:
+                logger.info("[Phraser] OpenAI response generated successfully")
+                return response_text
+        except Exception as e:
+            logger.warning("[Phraser] OpenAI failed (%s) — falling back to Groq", e)
 
-        # 3. Parse and return the response
-        response_text = chat_completion.choices[0].message.content
+    # --- Fallback: Groq ---
+    if groq_client:
+        try:
+            response_text = await _call_groq(system_prompt, user_prompt, groq_client)
+            if response_text:
+                logger.info("[Phraser] Groq fallback response generated successfully")
+                return response_text
+        except Exception as e:
+            logger.error("[Phraser] Groq fallback also failed: %s", e)
 
-        if not response_text:
-            logger.error("LLM returned an empty response.")
-            return "I'm sorry, I'm not sure how to respond to that."
-
-        logger.info(f"Generated response: {response_text}")
-        return response_text
-
-    except Exception as e:
-        logger.error(f"Error calling Groq API: {e}", exc_info=True)
-        # Return a safe, generic fallback response
-        return "We seem to be having a technical issue. Please try again in a moment."
+    # --- Static fallback ---
+    logger.error("[Phraser] All LLM providers failed — returning static fallback")
+    return "Let me think about that for a moment. Could you please try again?"

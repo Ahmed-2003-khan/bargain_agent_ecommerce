@@ -35,6 +35,7 @@ services:
       - STRATEGY_ENGINE_URL=${STRATEGY_ENGINE_URL:-http://strategy-engine:8000}
       - LLM_PHRASER_URL=${LLM_PHRASER_URL:-http://llm-phraser:8000}
       - NLU_URL=${NLU_URL:-http://nlu-service:8000}
+      - DB_SYNC_URL=${DB_SYNC_URL}
     depends_on:
       redis:
         condition: service_healthy
@@ -96,6 +97,7 @@ services:
     expose:
       - "8000"
     environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - INTERNAL_SERVICE_KEY=${INTERNAL_SERVICE_KEY}
     healthcheck:

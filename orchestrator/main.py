@@ -44,6 +44,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("orchestrator")
 
+# ---------------------- Config ----------------------
+DB_SYNC_URL = os.getenv("DB_SYNC_URL", "")
+
+if not DB_SYNC_URL:
+    logger.warning("DB_SYNC_URL not set — negotiation outcomes will NOT be synced to DB.")
+
 # 🔥 Build Graph Once (Startup Time)
 graph_app = build_workflow()
 
@@ -128,7 +134,7 @@ ALLOWED_ORIGINS = (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,  # JWT is sent in Authorization header, not cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -165,10 +171,10 @@ class ChatOutput(BaseModel):
 
 
 # ⚠️  TEST-ONLY SCHEMA — REMOVE BEFORE PRODUCTION ⚠️
-# class SeedSessionInput(BaseModel):
-#     user_id: str
-#     mam: float
-#     asking_price: float
+class SeedSessionInput(BaseModel):
+    user_id: str
+    mam: float
+    asking_price: float
 
 
 # =====================================================
@@ -259,27 +265,27 @@ async def health_check():
 # Used by run_adversarial_tests.py to bypass the monolith
 # session-creation flow.
 # =====================================================
-# @app.post("/ina/v1/seed")
-# async def seed_session(payload: SeedSessionInput):
-#     session = {
-#         "mam":           payload.mam,
-#         "asking_price":  payload.asking_price,
-#         "messages":      [],
-#         "offer_count":   0,
-#         "status":        "negotiating",
-#         "last_bot_offer": None,
-#     }
-#     ok = await state_manager.set_session(payload.user_id, session)
-#     if not ok:
-#         raise HTTPException(
-#             status_code=500,
-#             detail={"error": True, "code": "SEED_FAILED",
-#                     "message": "Failed to write session to Redis."},
-#         )
-#     logger.info("[TEST-SEED] user_id=%s mam=%s asking_price=%s",
-#                 payload.user_id, payload.mam, payload.asking_price)
-#     return {"seeded": True, "user_id": payload.user_id,
-#             "mam": payload.mam, "asking_price": payload.asking_price}
+@app.post("/ina/v1/seed")
+async def seed_session(payload: SeedSessionInput):
+    session = {
+        "mam":           payload.mam,
+        "asking_price":  payload.asking_price,
+        "messages":      [],
+        "offer_count":   0,
+        "status":        "negotiating",
+        "last_bot_offer": None,
+    }
+    ok = await state_manager.set_session(payload.user_id, session)
+    if not ok:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": True, "code": "SEED_FAILED",
+                    "message": "Failed to write session to Redis."},
+        )
+    logger.info("[TEST-SEED] user_id=%s mam=%s asking_price=%s",
+                payload.user_id, payload.mam, payload.asking_price)
+    return {"seeded": True, "user_id": payload.user_id,
+            "mam": payload.mam, "asking_price": payload.asking_price}
 
 
 # ---------------------- DB Sync Task ----------------------
@@ -290,6 +296,7 @@ async def send_negotiation_outcome_to_db(
     final_price: float,
     language: str,
     history: list,
+    started_at: str | None = None,
 ):
     """Fire-and-forget task to send negotiation summary to external DB."""
     try:
@@ -300,6 +307,8 @@ async def send_negotiation_outcome_to_db(
                 ((asking_price - final_price) / asking_price) * 100, 2
             )
 
+        ended_at = datetime.now(timezone.utc).isoformat()
+
         payload = {
             "session_id": session_id,
             "outcome": outcome,
@@ -308,15 +317,19 @@ async def send_negotiation_outcome_to_db(
             "discount_percent": discount_percent,
             "total_turns": user_turns,
             "user_language": language,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "ended_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at or ended_at,  # fallback to ended_at if session had no created_at
+            "ended_at": ended_at,
             "message_history": history,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                "https://ina-backend-fyp.onrender.com/api/negotiations/", json=payload
+        if not DB_SYNC_URL:
+            logger.warning(
+                "DB_SYNC_URL not configured — skipping DB sync for session %s", session_id
             )
+            return
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(DB_SYNC_URL, json=payload)
             resp.raise_for_status()
             logger.info(
                 "Successfully sent negotiation outcome to DB for session %s", session_id
@@ -340,7 +353,7 @@ async def send_negotiation_outcome_to_db(
 # 🔥 MAIN CHAT ENDPOINT (Session-Authenticated + Rate-Limited)
 # =====================================================
 @app.post("/ina/v1/chat", response_model=ChatOutput)
-@limiter.limit("1000/minute")
+@limiter.limit("10/minute")
 async def chat_endpoint(
     request: Request,
     payload: ChatInput,
@@ -521,6 +534,7 @@ async def chat_endpoint(
                     final_price=float(db_final_price),
                     language=language,
                     history=history,
+                    started_at=latest_session.created_at,
                 )
 
         deal_accepted = brain_action in ("ACCEPT", "DEAL") or new_status == "locked"

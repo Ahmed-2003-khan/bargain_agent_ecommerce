@@ -557,17 +557,6 @@ async def chat_endpoint(
     except HTTPException:
         raise
 
-    except TimeoutError:
-        logger.warning("Session lock timeout for user_id=%s", payload.user_id)
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": True,
-                "code": "SESSION_LOCKED",
-                "message": "Another request is already processing this session. Please retry.",
-            },
-        )
-
     except Exception as e:
         logger.exception("Unexpected error for session %s: %s", payload.user_id, e)
         raise HTTPException(

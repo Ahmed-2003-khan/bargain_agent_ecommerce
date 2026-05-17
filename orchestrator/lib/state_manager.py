@@ -161,8 +161,12 @@ async def session_lock(
             session_id,
         )
         raise HTTPException(
-            status_code=429,
-            detail="Another request is already being processed for this session. Please retry in a moment.",
+            status_code=409,
+            detail={
+                "error": True,
+                "code": "SESSION_LOCKED",
+                "message": "Another request is already processing this session. Please retry.",
+            },
         )
 
     try:

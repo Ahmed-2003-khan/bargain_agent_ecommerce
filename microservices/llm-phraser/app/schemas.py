@@ -87,7 +87,7 @@ class PhraserOutput(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "response_text": "That's a bit lower than we were expecting. Based on the market, I can meet you at $48,000. How does that sound?"
+                "response_text": "That's a bit lower than we were expecting. Based on the market, I can meet you at Rs 48,000. How does that sound?"
             }
         }
     )

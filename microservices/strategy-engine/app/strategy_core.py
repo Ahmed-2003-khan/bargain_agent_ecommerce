@@ -184,6 +184,25 @@ def make_decision(input_data: StrategyInput) -> StrategyOutput:
     current_bot_price = get_last_bot_offer(input_data)
     total_offers = past_offers + 1  # includes current one
     offer_history = get_user_offer_history(input_data.history)
+
+    # If the user's new offer is equal to or lower than their previous one,
+    # hold firm — repeat the bot's last offer instead of conceding further.
+    if offer_history and input_data.user_offer <= offer_history[-1]:
+        return StrategyOutput(
+            action="COUNTER",
+            response_key="COUNTER_HOLD_FIRM",
+            counter_price=math.ceil(current_bot_price),
+            policy_type="rule-based",
+            policy_version=POLICY_VERSION,
+            decision_metadata={
+                "rule": "backward_offer_hold",
+                "mam": input_data.mam,
+                "offer_number": total_offers,
+                "previous_user_offer": offer_history[-1],
+                "current_user_offer": input_data.user_offer,
+            },
+        )
+
     pattern = detect_pattern(
         input_data.user_offer, offer_history, input_data.asking_price
     )

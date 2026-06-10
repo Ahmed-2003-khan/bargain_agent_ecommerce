@@ -22,7 +22,7 @@ CONCESSION_LADDER = [
     (3, 0.20),  # Offer 3–4: Give 20% of the gap (slowing down)
     (5, 0.10),  # Offer 5+:  Give only 10% (near-final resistance)
 ]
-FINAL_OFFER_FACTOR = 0.50  # When triggering FINAL, split remaining gap
+FINAL_OFFER_FACTOR = 0.10  # Final round: small closing concession, preserves MAM headroom
 
 # --- Pattern Detection ---
 STALL_DELTA_PERCENT = 0.01  # If user's offer moves <1% of asking price = stalling
